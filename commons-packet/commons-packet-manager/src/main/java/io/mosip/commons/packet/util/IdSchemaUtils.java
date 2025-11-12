@@ -17,10 +17,13 @@ import java.util.List;
 import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.mosip.commons.packet.audit.ServerUtil;
 import org.apache.commons.lang3.ArrayUtils;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -41,6 +44,10 @@ import io.mosip.commons.packet.exception.ApiNotAccessibleException;
  */
 @Component
 public class IdSchemaUtils {
+
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(IdSchemaUtils.class);
+
 
     private org.json.simple.JSONObject mappingJsonObject = null;
     private static Map<String, String> categorySubpacketMapping = new HashMap<>();
@@ -122,11 +129,17 @@ public class IdSchemaUtils {
         UriComponents uriComponents = builder.build(false).encode();
 
         String response = restTemplate.getForObject(uriComponents.toUri(), String.class);
+
+        LOGGER.info(" IDSCHEMA RESPONSE : {}" ,response);
         String responseString = null;
         try {
             JSONObject jsonObject = new JSONObject(response);
+            LOGGER.info(" IDSCHEMA jsonObject : {}" ,jsonObject);
             JSONObject respObj = (JSONObject) jsonObject.get(RESPONSE);
+            LOGGER.info(" IDSCHEMA respObj : {}" ,respObj);
             responseString = respObj != null ? (String) respObj.get(SCHEMA_JSON) : null;
+            LOGGER.info(" IDSCHEMA responseString : {}" ,responseString);
+
         } catch (JSONException e) {
             throw new IOException(e);
         }
