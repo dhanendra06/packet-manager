@@ -531,10 +531,10 @@ public class PacketReaderService {
 
         return mergedDocuments;
     }
-
+    
     private int extractInt(String s) {
-        String num = s.replaceAll("\\D", "");
-        // return 0 if no digits found
-        return num.isEmpty() ? 0 : Integer.parseInt(num);
+        if (s == null) return 0; // or another default as per domain logic
+        String numeric = s.replaceAll("\\D", "");
+        return numeric.isEmpty() ? 0 : Integer.parseInt(numeric);
     }
 }
