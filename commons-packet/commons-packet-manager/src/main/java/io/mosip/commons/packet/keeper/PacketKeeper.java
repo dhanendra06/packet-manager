@@ -35,6 +35,9 @@ import io.mosip.kernel.core.logger.spi.Logger;
 import io.mosip.kernel.core.util.CryptoUtil;
 import io.mosip.kernel.core.util.HMACUtils2;
 
+import static io.mosip.commons.khazana.config.LoggerConfiguration.REGISTRATIONID;
+import static io.mosip.commons.khazana.config.LoggerConfiguration.SESSIONID;
+
 /**
  * The packet keeper is used to store & retrieve packet, creation of audit, encrypt and sign packet.
  * Packet keeper is used to get container information and list of sources from a packet.
@@ -140,7 +143,9 @@ public class PacketKeeper {
      * @return : Packet
      */
     public Packet getPacket(PacketInfo packetInfo) throws PacketKeeperException {
+        long startTime = System.currentTimeMillis();
         try {
+            LOGGER.info("PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID, getName(packetInfo.getId(), packetInfo.getPacketName()) starttime : {}",startTime);
             InputStream is = getAdapter().getObject(PACKET_MANAGER_ACCOUNT, packetInfo.getId(), packetInfo.getSource(),
                     packetInfo.getProcess(), getName(packetInfo.getId(), packetInfo.getPacketName()));
             if (is == null) {
@@ -170,6 +175,8 @@ public class PacketKeeper {
                         getName(packet.getPacketInfo().getId(), packetInfo.getPacketName()), "Packet Integrity and Signature check failed");
                 throw new PacketIntegrityFailureException();
             }
+            long endTime = System.currentTimeMillis();
+            LOGGER.info(SESSIONID, REGISTRATIONID, "getPacket  :  total time " + (endTime - startTime) + "ms");
 
             return packet;
         } catch (Exception e) {
