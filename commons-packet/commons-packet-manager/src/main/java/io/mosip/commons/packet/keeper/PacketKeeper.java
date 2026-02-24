@@ -145,7 +145,7 @@ public class PacketKeeper {
     public Packet getPacket(PacketInfo packetInfo) throws PacketKeeperException {
         long startTime = System.currentTimeMillis();
         try {
-            LOGGER.info("PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID, getName(packetInfo.getId(), packetInfo.getPacketName()) starttime : {}",startTime);
+            LOGGER.info("PacketManagerLogger getName:{} packetInfo.getid():{} starttime : {}",packetInfo.getPacketName(),packetInfo.getId(),startTime);
             InputStream is = getAdapter().getObject(PACKET_MANAGER_ACCOUNT, packetInfo.getId(), packetInfo.getSource(),
                     packetInfo.getProcess(), getName(packetInfo.getId(), packetInfo.getPacketName()));
             if (is == null) {
@@ -176,8 +176,7 @@ public class PacketKeeper {
                 throw new PacketIntegrityFailureException();
             }
             long endTime = System.currentTimeMillis();
-            LOGGER.info(SESSIONID, REGISTRATIONID, "getPacket  :  total time " + (endTime - startTime) + "ms");
-
+            LOGGER.info("getPacket  getid:{}  :  total time : {}" ,packetInfo.getId(), (endTime - startTime));
             return packet;
         } catch (Exception e) {
             LOGGER.error(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID, packetInfo.getId(), ExceptionUtils.getStackTrace(e));
