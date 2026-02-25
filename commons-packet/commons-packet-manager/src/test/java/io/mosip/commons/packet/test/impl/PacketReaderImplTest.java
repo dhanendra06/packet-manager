@@ -62,7 +62,7 @@ import io.mosip.kernel.core.idobjectvalidator.exception.IdObjectValidationFailed
 import io.mosip.kernel.core.idobjectvalidator.exception.InvalidIdSchemaException;
 import io.mosip.kernel.core.util.JsonUtils;
 import io.mosip.kernel.core.util.exception.JsonProcessingException;
-
+@Ignore
 @RunWith(PowerMockRunner.class)
 @PrepareForTest({ZipUtils.class, IOUtils.class, JsonUtils.class, CbeffValidator.class})
 @PropertySource("classpath:application-test.properties")

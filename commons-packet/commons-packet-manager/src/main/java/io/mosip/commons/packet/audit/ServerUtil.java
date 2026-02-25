@@ -1,46 +1,32 @@
 package io.mosip.commons.packet.audit;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import java.net.InetAddress;
 import java.net.UnknownHostException;
-
 public class ServerUtil {
-
 	/** The server instance. */
-	private static ServerUtil serverInstance = null;
-	
+	private static ServerUtil INSTANCE = new ServerUtil();
+
 	/** The Constant LOGGER. */
 	private static final Logger LOGGER = LoggerFactory.getLogger(ServerUtil.class);
-	
+
 	/** The host not found. */
 	private String noHost  = "HOST_NOT_FOUND";
-
 	/**
-	 * 
+	 *
 	 * Instantiates a new server util.
 	 */
 	private ServerUtil() {
 		super();
 	}
-
 	/**
 	 * This method return singleton instance.
 	 *
 	 * @return The ServerUtil object
 	 */
-	public static synchronized ServerUtil getServerUtilInstance() {
-
-		if (serverInstance == null) {
-			serverInstance = new ServerUtil();
-			return serverInstance;
-		} else {
-			return serverInstance;
-		}
-
+	public static ServerUtil getServerUtilInstance() {
+		return INSTANCE;
 	}
-
 	/**
 	 * This method return ServerIp.
 	 *
@@ -48,16 +34,13 @@ public class ServerUtil {
 	 *
 	 */
 	public String getServerIp() {
-
 		try {
 			return InetAddress.getLocalHost().getHostAddress();
 		} catch (UnknownHostException e) {
 			LOGGER.error(noHost, e.getMessage());
 			return "UNKNOWN-HOST";
 		}
-
 	}
-
 	/**
 	 * This method return Server Host Name.
 	 *
@@ -72,5 +55,4 @@ public class ServerUtil {
 			return "UNKNOWN-HOST";
 		}
 	}
-
 }

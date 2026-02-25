@@ -89,11 +89,11 @@ public class PacketValidator {
         boolean result = validateSchema(id, source, process);
         if(result) {
             LOGGER.info(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID, id, "Id object validation successful for process name : " + process);
-            auditLogEntry.addAudit("Id object validation successful", eventId, eventName, eventType, null, null, id);
+            auditLogEntry.addAuditAsync("Id object validation successful", eventId, eventName, eventType, null, null, id);
             result = fileAndChecksumValidation(id, source, process);
         } else {
             LOGGER.error(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID, id, "Id object validation failed for process name : " + process);
-            auditLogEntry.addAudit("Id object validation failed", eventId, eventName, eventType, null, null, id);
+            auditLogEntry.addAuditAsync("Id object validation failed", eventId, eventName, eventType, null, null, id);
         }
 
         return result;
@@ -157,10 +157,10 @@ public class PacketValidator {
 
                 if (fileValidation) {
                     LOGGER.info(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID, id, "File validation successful for packet name : " + packetName);
-                    auditLogEntry.addAudit("File validation successful", eventId, eventName, eventType, null, null, id);
+                    auditLogEntry.addAuditAsync("File validation successful", eventId, eventName, eventType, null, null, id);
                 } else {
                     LOGGER.error(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID, id, "File validation failed for packet name : " + packetName);
-                    auditLogEntry.addAudit("File validation failed", eventId, eventName, eventType, null, null, id);
+                    auditLogEntry.addAuditAsync("File validation failed", eventId, eventName, eventType, null, null, id);
                     return false;
                 }
 
@@ -168,10 +168,10 @@ public class PacketValidator {
 
                 if (checksumValidation) {
                     LOGGER.info(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID, id, "Checksum validation successful for packet name : " + packetName);
-                    auditLogEntry.addAudit("Checksum validation successful", eventId, eventName, eventType, null, null, id);
+                    auditLogEntry.addAuditAsync("Checksum validation successful", eventId, eventName, eventType, null, null, id);
                 } else {
                     LOGGER.error(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID, id, "Checksum validation failed for packet name : " + packetName);
-                    auditLogEntry.addAudit("Checksum validation failed", eventId, eventName, eventType, null, null, id);
+                    auditLogEntry.addAuditAsync("Checksum validation failed", eventId, eventName, eventType, null, null, id);
                     return false;
                 }
 

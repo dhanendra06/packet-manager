@@ -9,7 +9,7 @@
     <name>commons-packet-manager</name>
     <description>Mosip commons project </description>
     <url>https://github.com/mosip/commons</url>
-    <version>1.3.0</version>
+    <version>1.3.0-SNAPSHOT</version>
  <properties>
         <!-- maven -->
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -27,7 +27,7 @@
 		<git.commit.plugin.version>3.0.1</git.commit.plugin.version>
         <maven.surefire.plugin.version>2.22.0</maven.surefire.plugin.version>
         <hazelcast.kubernetes.version>1.3.1</hazelcast.kubernetes.version>
-
+        <org.apache.commons.compress.version>1.26.2</org.apache.commons.compress.version>
         <kernel-keymanager-service.version>1.3.0</kernel-keymanager-service.version>
         <kernel-idobjectvalidator.version>1.3.0</kernel-idobjectvalidator.version>
         <kernel.core.version>1.3.0</kernel.core.version>
@@ -147,6 +147,11 @@
 				<artifactId>mockito-core</artifactId>
 				 <version>${mockito.core.version}</version>
 			</dependency>
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-compress</artifactId>
+            <version>${org.apache.commons.compress.version}</version>  <!-- or latest stable -->
+        </dependency>
     </dependencies>
 
 
