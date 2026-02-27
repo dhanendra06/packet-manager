@@ -3,17 +3,17 @@ package io.mosip.commons.packet.util;
 import io.mosip.kernel.core.logger.spi.Logger;
 import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
 import org.apache.commons.compress.archivers.zip.ZipArchiveInputStream;
-import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.io.IOCase;
 import org.apache.commons.io.IOUtils;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -93,22 +93,17 @@ public class ZipUtils {
                 if (entry.isDirectory()) {
                     continue;
                 }
-                if (fileName.equals(entry.getName())) {
+                String entryName = entry.getName();
+                String fileNameWithOutExt = FilenameUtils.removeExtension(entryName);
+                if (FilenameUtils.equals(fileNameWithOutExt, fileName, true, IOCase.INSENSITIVE)) {
                     // Found → read content
                     byte[] content = IOUtils.toByteArray(zipIn);
                     LOGGER.debug(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID, null,
                             "Extracted: " + fileName + " (" + content.length + " bytes)");
                     return content;
                 }
-                // Optional: case-insensitive fallback
-                if (fileName.equalsIgnoreCase(entry.getName())) {
-                    byte[] content = IOUtils.toByteArray(zipIn);
-                    LOGGER.debug(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID, null,
-                            "Extracted (case-insensitive): " + entry.getName() + " (" + content.length + " bytes)");
-                    return content;
-                }
             }
-            LOGGER.debug(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID, null,
+            LOGGER.info(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID, null,
                     "File not found in ZIP: " + fileName);
             return null;
         } catch (IOException e) {
@@ -116,5 +111,25 @@ public class ZipUtils {
                     "Failed to extract " + fileName + " from ZIP", e);
             throw e;
         }
+    }
+
+    public static Map<String, byte[]> unzipAllFiles(byte[] zipBytes) throws IOException {
+        if (zipBytes == null || zipBytes.length == 0) return Collections.emptyMap();
+
+        Map<String, byte[]> fileMap = new HashMap<>();
+        // Use ArchiveInputStream to stay compatible with older commons-io
+        try (ByteArrayInputStream bais = new ByteArrayInputStream(zipBytes);
+             ZipArchiveInputStream zipIn = new ZipArchiveInputStream(bais)) {
+
+            org.apache.commons.compress.archivers.ArchiveEntry entry;
+            while ((entry = zipIn.getNextEntry()) != null) {
+                if (!entry.isDirectory()) {
+                    // Remove extension and lowercase for O(1) Map lookup later
+                    String name = FilenameUtils.removeExtension(entry.getName()).toLowerCase();
+                    fileMap.put(name, IOUtils.toByteArray(zipIn));
+                }
+            }
+        }
+        return fileMap;
     }
 }
