@@ -3,8 +3,6 @@ package io.mosip.commons.packet.test.impl;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import io.mosip.commons.packet.dto.ClientPublicKeyResponseDto;
-import io.mosip.commons.packet.dto.TpmSignVerifyResponseDto;
 import io.mosip.commons.packet.dto.packet.CryptomanagerResponseDto;
 import io.mosip.commons.packet.dto.packet.DecryptResponseDto;
 import io.mosip.commons.packet.exception.ApiNotAccessibleException;
@@ -13,11 +11,8 @@ import io.mosip.commons.packet.exception.SignatureException;
 import io.mosip.commons.packet.impl.OnlinePacketCryptoServiceImpl;
 import io.mosip.commons.packet.util.ZipUtils;
 import io.mosip.kernel.core.exception.ServiceError;
-import io.mosip.kernel.core.http.ResponseWrapper;
 import io.mosip.kernel.core.util.CryptoUtil;
-import io.mosip.kernel.core.util.DateUtils;
 import io.mosip.kernel.core.util.JsonUtils;
-import io.mosip.kernel.cryptomanager.constant.CryptomanagerConstant;
 import org.apache.commons.io.IOUtils;
 import org.assertj.core.util.Lists;
 import org.junit.Before;
@@ -25,35 +20,25 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.MockedStatic;
-import org.mockito.Mockito;
-import org.powermock.api.mockito.PowerMockito;
 import org.powermock.core.classloader.annotations.PowerMockIgnore;
 import org.powermock.core.classloader.annotations.PrepareForTest;
 import org.powermock.modules.junit4.PowerMockRunner;
 import org.springframework.context.annotation.PropertySource;
-import org.springframework.http.*;
+import org.springframework.http.HttpHeaders;
 import org.springframework.test.util.ReflectionTestUtils;
-import org.springframework.util.MultiValueMap;
-import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.HttpServerErrorException;
-import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
+import reactor.core.publisher.Mono;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.format.DateTimeParseException;
 import java.util.*;
 
-import static org.assertj.core.api.AssertionsForClassTypes.not;
 import static org.junit.Assert.*;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
-
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonMappingException;
 
 @RunWith(PowerMockRunner.class)
 @PrepareForTest({ZipUtils.class, IOUtils.class, JsonUtils.class})
@@ -67,33 +52,59 @@ public class OnlinePacketCryptoServiceTest {
     private OnlinePacketCryptoServiceImpl onlinePacketCryptoService;
 
     @Mock
-    private RestTemplate restTemplate;
+    private WebClient webClient;
+
+    @Mock
+    private WebClient.RequestBodyUriSpec requestBodyUriSpec;
+
+    @Mock
+    private WebClient.RequestBodySpec requestBodySpec;
+
+    @Mock
+    @SuppressWarnings("rawtypes")
+    private WebClient.RequestHeadersSpec requestHeadersSpec;
+
+    @Mock
+    private WebClient.ResponseSpec responseSpec;
+
+    @Mock
+    @SuppressWarnings("rawtypes")
+    private WebClient.RequestHeadersUriSpec requestHeadersUriSpec;
 
     @Mock
     private ObjectMapper mapper;
 
     @Before
+    @SuppressWarnings("unchecked")
     public void setup() {
         ReflectionTestUtils.setField(onlinePacketCryptoService, "DATETIME_PATTERN", "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
         ReflectionTestUtils.setField(onlinePacketCryptoService, "APPLICATION_VERSION", "v1");
         ReflectionTestUtils.setField(onlinePacketCryptoService, "cryptomanagerDecryptUrl", "http://localhost");
         ReflectionTestUtils.setField(onlinePacketCryptoService, "cryptomanagerEncryptUrl", "http://localhost");
-        ReflectionTestUtils.setField(onlinePacketCryptoService, "DATETIME_PATTERN", "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
         ReflectionTestUtils.setField(onlinePacketCryptoService, "syncdataGetTpmKeyUrl", "http://localhost/");
 
+        // POST chain: post() → uri() → bodyValue() → retrieve() → bodyToMono()
+        when(webClient.post()).thenReturn(requestBodyUriSpec);
+        when(requestBodyUriSpec.uri(anyString())).thenReturn(requestBodySpec);
+        when(requestBodySpec.bodyValue(any())).thenReturn(requestHeadersSpec);
+        when(requestHeadersSpec.retrieve()).thenReturn(responseSpec);
+
+        // GET chain: get() → uri() → (reuses requestHeadersSpec) → retrieve() → bodyToMono()
+        when(webClient.get()).thenReturn(requestHeadersUriSpec);
+        when(requestHeadersUriSpec.uri(anyString())).thenReturn(requestHeadersSpec);
     }
 
     @Test
     public void signTest() throws IOException {
         String expected = "signature";
-        LinkedHashMap submap = new LinkedHashMap();
+        LinkedHashMap<String, Object> submap = new LinkedHashMap<>();
         submap.put("data", CryptoUtil.encodeToURLSafeBase64(expected.getBytes(StandardCharsets.UTF_8)));
-        LinkedHashMap responseMap = new LinkedHashMap();
+        LinkedHashMap<String, Object> responseMap = new LinkedHashMap<>();
         responseMap.put("response", submap);
-        ReflectionTestUtils.setField(onlinePacketCryptoService, "keymanagerCsSignUrl", "localhost");
-        ResponseEntity<String> response = new ResponseEntity<>("hello", HttpStatus.OK);
 
-        when(restTemplate.exchange(anyString(), any(HttpMethod.class), any(HttpEntity.class), any(Class.class))).thenReturn(response);
+        ReflectionTestUtils.setField(onlinePacketCryptoService, "keymanagerCsSignUrl", "localhost");
+
+        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.just("hello"));
         when(mapper.readValue(anyString(), any(Class.class))).thenReturn(responseMap);
 
         byte[] result = onlinePacketCryptoService.sign("packet".getBytes());
@@ -102,19 +113,13 @@ public class OnlinePacketCryptoServiceTest {
 
     @Test(expected = SignatureException.class)
     public void signExceptionTest() throws IOException {
-        String expected = "signature";
         byte[] packet = "packet".getBytes();
-        LinkedHashMap submap = new LinkedHashMap();
-        submap.put("signature", expected);
-        LinkedHashMap responseMap = new LinkedHashMap();
-        responseMap.put("response", submap);
         ReflectionTestUtils.setField(onlinePacketCryptoService, "keymanagerCsSignUrl", "localhost");
-        ResponseEntity<String> response = new ResponseEntity<>("hello", HttpStatus.OK);
 
-        when(restTemplate.exchange(anyString(), any(HttpMethod.class), any(HttpEntity.class), any(Class.class))).thenReturn(response);
+        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.just("hello"));
         when(mapper.readValue(anyString(), any(Class.class))).thenThrow(new JsonMappingException("exception"));
 
-        byte[] result = onlinePacketCryptoService.sign(packet);
+        onlinePacketCryptoService.sign(packet);
     }
 
     @Test
@@ -125,26 +130,23 @@ public class OnlinePacketCryptoServiceTest {
         DecryptResponseDto decryptResponseDto = new DecryptResponseDto("packet");
         cryptomanagerResponseDto.setResponse(decryptResponseDto);
 
-
         ReflectionTestUtils.setField(onlinePacketCryptoService, "cryptomanagerEncryptUrl", "localhost");
-        ResponseEntity<String> response = new ResponseEntity<>("hello", HttpStatus.OK);
 
-        when(restTemplate.exchange(anyString(), any(HttpMethod.class), any(HttpEntity.class), any(Class.class))).thenReturn(response);
+        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.just("hello"));
         when(mapper.readValue(anyString(), any(Class.class))).thenReturn(cryptomanagerResponseDto);
 
         byte[] result = onlinePacketCryptoService.encrypt(ID, packet);
         assertNotNull(result);
     }
 
-    @Test(expected = PacketDecryptionFailureException.class)
+    @Test(expected = ApiNotAccessibleException.class)
     public void encryptExceptionTest() throws IOException {
-        String expected = "signature";
         byte[] packet = "packet".getBytes();
-
         ReflectionTestUtils.setField(onlinePacketCryptoService, "cryptomanagerEncryptUrl", "localhost");
 
-        when(restTemplate.exchange(anyString(), any(HttpMethod.class),
-                any(HttpEntity.class), any(Class.class))).thenThrow(new HttpClientErrorException(HttpStatus.BAD_REQUEST));
+        WebClientResponseException ex = WebClientResponseException.create(
+                400, "Bad Request", HttpHeaders.EMPTY, "error".getBytes(), StandardCharsets.UTF_8);
+        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.error(ex));
 
         onlinePacketCryptoService.encrypt(ID, packet);
     }
@@ -154,58 +156,58 @@ public class OnlinePacketCryptoServiceTest {
         byte[] packet = "10001100770000320200720092256_packetwithsignatureandaad".getBytes();
         CryptomanagerResponseDto cryptomanagerResponseDto = new CryptomanagerResponseDto();
         cryptomanagerResponseDto.setErrors(null);
-        DecryptResponseDto decryptResponseDto = new DecryptResponseDto(CryptoUtil.encodeToURLSafeBase64("packet".getBytes()));
+        DecryptResponseDto decryptResponseDto = new DecryptResponseDto(
+                CryptoUtil.encodeToURLSafeBase64("packet".getBytes()));
         cryptomanagerResponseDto.setResponse(decryptResponseDto);
 
-
         ReflectionTestUtils.setField(onlinePacketCryptoService, "cryptomanagerDecryptUrl", "localhost");
-        ResponseEntity<String> response = new ResponseEntity<>("hello", HttpStatus.OK);
 
-        when(restTemplate.exchange(anyString(), any(HttpMethod.class), any(HttpEntity.class), any(Class.class))).thenReturn(response);
+        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.just("hello"));
         when(mapper.readValue(anyString(), any(Class.class))).thenReturn(cryptomanagerResponseDto);
 
         byte[] result = onlinePacketCryptoService.decrypt(ID, packet);
         assertNotNull(result);
     }
 
-    @Test(expected = PacketDecryptionFailureException.class)
+    @Test(expected = ApiNotAccessibleException.class)
     public void decryptExceptionTest() throws IOException {
-        String expected = "signature";
-        byte[] packet = "packet".getBytes();
-
+        // packet must be >= GCM_NONCE_LENGTH(12) + GCM_AAD_LENGTH(32) = 44 bytes
+        byte[] packet = new byte[44];
         ReflectionTestUtils.setField(onlinePacketCryptoService, "cryptomanagerDecryptUrl", "localhost");
 
-        when(restTemplate.exchange(anyString(), any(HttpMethod.class),
-                any(HttpEntity.class), any(Class.class))).thenThrow(new HttpClientErrorException(HttpStatus.BAD_REQUEST));
+        WebClientResponseException ex = WebClientResponseException.create(
+                400, "Bad Request", HttpHeaders.EMPTY, "error".getBytes(), StandardCharsets.UTF_8);
+        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.error(ex));
 
         onlinePacketCryptoService.decrypt(ID, packet);
     }
 
     @Test
     public void verifyTest() throws IOException {
-        String expected = "signature";
         byte[] packet = "packet".getBytes();
-        
-        LinkedHashMap submap = new LinkedHashMap();
-        submap.put("verified", true);
-        submap.put("encryptionPublicKey", "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAkK7cfIRc"
-        		+ "b18uvtrQwajS9NElOzB6BRDZgy1BiumpAasKIf2kzUZfnctZqlIX1zkB1p6RDEaLeRoXHlPflz92kqMhfz5yZaDZFm7fV"
-        		+ "mMO4TVjZXy2+8OmWW1EQTEFa7SQ9V8MTYWlaBSheWfUqCaCPiUjX0B8n8y1j4f8GdLagso/DBPc+zcqItmNTPbKhb606Jc"
-        		+ "v6sSbu6N3HhhlnqGdsxmTradTnYYRYBNgRZ+tkmKlDjSAhOgnYpkRRvGBFI0hUYvm6fOgA7nUrqjc7xc8tSlk0ZJxr"
-        		+ "ic++DZYEEigypYE+CWpQXlkmioMnMwi/WEwQfg88LNoxrrY238kE9nRbwIDAQAB");
-        LinkedHashMap responseMap = new LinkedHashMap();
-        responseMap.put("response", submap);
-        
+
+        LinkedHashMap<String, Object> publicKeyInner = new LinkedHashMap<>();
+        publicKeyInner.put("signingPublicKey", "testPublicKey");
+        LinkedHashMap<String, Object> publicKeyResponse = new LinkedHashMap<>();
+        publicKeyResponse.put("response", publicKeyInner);
+
+        LinkedHashMap<String, Object> verifyInner = new LinkedHashMap<>();
+        verifyInner.put("verified", true);
+        LinkedHashMap<String, Object> verifyResponse = new LinkedHashMap<>();
+        verifyResponse.put("response", verifyInner);
+
         ReflectionTestUtils.setField(onlinePacketCryptoService, "keymanagerCsverifysignUrl", "localhost");
-        ReflectionTestUtils.setField(onlinePacketCryptoService, "syncdataGetTpmKeyUrl", "localhost");
-        ResponseEntity<String> response = new ResponseEntity<>("hello", HttpStatus.OK);
+        ReflectionTestUtils.setField(onlinePacketCryptoService, "syncdataGetTpmKeyUrl", "http://localhost/");
 
-        when(restTemplate.exchange(anyString(), any(HttpMethod.class), any(HttpEntity.class), any(Class.class))).thenReturn(response);
-        when(restTemplate.exchange("localhost"+"10077", HttpMethod.GET, null, String.class)).thenReturn(response);
-        
-        when(mapper.readValue(anyString(), any(Class.class))).thenReturn(responseMap);
+        // First call: GET for public key; second call: POST for verify
+        when(responseSpec.bodyToMono(String.class))
+                .thenReturn(Mono.just("getKeyResponse"))
+                .thenReturn(Mono.just("verifyResponse"));
+        when(mapper.readValue(anyString(), any(Class.class)))
+                .thenReturn(publicKeyResponse)
+                .thenReturn(verifyResponse);
 
-        boolean result = onlinePacketCryptoService.verify("10077_10077",packet, expected.getBytes());
+        boolean result = onlinePacketCryptoService.verify("10077_10077", packet, "signature".getBytes());
         assertTrue(result);
     }
 
@@ -224,12 +226,8 @@ public class OnlinePacketCryptoServiceTest {
         errors.add(serviceError);
         errorResponse.setErrors(errors);
 
-        ResponseEntity<String> response = new ResponseEntity<>("error-response", HttpStatus.OK);
-
-        when(restTemplate.exchange(anyString(), any(HttpMethod.class), any(HttpEntity.class), any(Class.class)))
-                .thenReturn(response);
-        when(mapper.readValue(anyString(), eq(CryptomanagerResponseDto.class)))
-                .thenReturn(errorResponse);
+        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.just("error-response"));
+        when(mapper.readValue(anyString(), eq(CryptomanagerResponseDto.class))).thenReturn(errorResponse);
 
         assertThrows(PacketDecryptionFailureException.class, () -> {
             onlinePacketCryptoService.encrypt(refId, packet);
@@ -248,12 +246,8 @@ public class OnlinePacketCryptoServiceTest {
         nullResponse.setResponse(null);
         nullResponse.setErrors(null);
 
-        ResponseEntity<String> response = new ResponseEntity<>("null-response", HttpStatus.OK);
-
-        when(restTemplate.exchange(anyString(), any(HttpMethod.class), any(HttpEntity.class), any(Class.class)))
-                .thenReturn(response);
-        when(mapper.readValue(anyString(), eq(CryptomanagerResponseDto.class)))
-                .thenReturn(nullResponse);
+        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.just("null-response"));
+        when(mapper.readValue(anyString(), eq(CryptomanagerResponseDto.class))).thenReturn(nullResponse);
 
         assertThrows(PacketDecryptionFailureException.class, () -> {
             onlinePacketCryptoService.encrypt(refId, packet);
@@ -261,32 +255,34 @@ public class OnlinePacketCryptoServiceTest {
     }
 
     /**
-     * Tests encrypt method when HTTP client error occurs - should throw PacketDecryptionFailureException
+     * Tests encrypt method when WebClient response error occurs - should throw ApiNotAccessibleException
      */
     @Test
-    public void testEncrypt_WhenHttpClientError_ThrowsPacketDecryptionFailureException() throws IOException {
+    public void testEncrypt_WhenHttpClientError_ThrowsApiNotAccessibleException() {
         byte[] packet = "test-packet".getBytes();
         String refId = "test-ref-id";
 
-        when(restTemplate.exchange(anyString(), any(HttpMethod.class), any(HttpEntity.class), any(Class.class)))
-                .thenThrow(new HttpClientErrorException(HttpStatus.BAD_REQUEST, "Bad Request"));
+        WebClientResponseException ex = WebClientResponseException.create(
+                400, "Bad Request", HttpHeaders.EMPTY, "error".getBytes(), StandardCharsets.UTF_8);
+        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.error(ex));
 
-        assertThrows(PacketDecryptionFailureException.class, () -> {
+        assertThrows(ApiNotAccessibleException.class, () -> {
             onlinePacketCryptoService.encrypt(refId, packet);
         });
     }
 
     /**
-     * Tests verify method when REST client exception occurs - should throw SignatureException
+     * Tests verify method when WebClient response error occurs - should throw SignatureException
      */
     @Test(expected = SignatureException.class)
-    public void testVerify_WhenRestClientException_ThrowsSignatureException() throws IOException {
+    public void testVerify_WhenWebClientException_ThrowsSignatureException() throws IOException {
         String refId = "10077_10077";
         byte[] packet = "packet".getBytes();
         byte[] signature = "signature".getBytes();
 
-        when(restTemplate.exchange(anyString(), any(HttpMethod.class), any(), any(Class.class)))
-                .thenThrow(new RestClientException("Rest client error"));
+        WebClientResponseException ex = WebClientResponseException.create(
+                500, "Internal Server Error", HttpHeaders.EMPTY, "error".getBytes(), StandardCharsets.UTF_8);
+        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.error(ex));
 
         onlinePacketCryptoService.verify(refId, packet, signature);
     }
@@ -296,9 +292,9 @@ public class OnlinePacketCryptoServiceTest {
      */
     @Test(expected = PacketDecryptionFailureException.class)
     public void testDecrypt_WhenDateTimeParseException_ThrowsPacketDecryptionFailureException() throws IOException {
-        when(restTemplate.exchange(anyString(), any(HttpMethod.class), any(HttpEntity.class), any(Class.class)))
-                .thenReturn(new ResponseEntity<>("response", HttpStatus.OK));
-        doThrow(new DateTimeParseException("Invalid date", "2023-13-45", 0)).when(mapper).readValue(anyString(), any(Class.class));
+        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.just("response"));
+        doThrow(new DateTimeParseException("Invalid date", "2023-13-45", 0))
+                .when(mapper).readValue(anyString(), any(Class.class));
 
         onlinePacketCryptoService.decrypt(ID, "packet".getBytes());
     }
@@ -315,10 +311,8 @@ public class OnlinePacketCryptoServiceTest {
         errors.add(error);
         errorResponse.setErrors(errors);
 
-        when(restTemplate.exchange(anyString(), any(HttpMethod.class), any(HttpEntity.class), any(Class.class)))
-                .thenReturn(new ResponseEntity<>("response", HttpStatus.OK));
-        when(mapper.readValue(anyString(), eq(CryptomanagerResponseDto.class)))
-                .thenReturn(errorResponse);
+        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.just("response"));
+        when(mapper.readValue(anyString(), eq(CryptomanagerResponseDto.class))).thenReturn(errorResponse);
 
         assertThrows(PacketDecryptionFailureException.class, () -> {
             onlinePacketCryptoService.decrypt(ID, "packet".getBytes());
@@ -330,6 +324,7 @@ public class OnlinePacketCryptoServiceTest {
      */
     @Test(expected = PacketDecryptionFailureException.class)
     public void testEncrypt_WhenIOException_ThrowsPacketDecryptionFailureException() throws Exception {
+        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.just("response"));
         when(mapper.readValue(anyString(), eq(CryptomanagerResponseDto.class)))
                 .thenThrow(new RuntimeException(new IOException("IO error")));
 
@@ -355,38 +350,32 @@ public class OnlinePacketCryptoServiceTest {
         ServiceError error = new ServiceError("ERROR_CODE", "Error message");
         responseDto.setErrors(Lists.newArrayList(error));
 
-        when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(), eq(String.class)))
-                .thenReturn(new ResponseEntity<>("response", HttpStatus.OK));
-        when(mapper.readValue(anyString(), eq(CryptomanagerResponseDto.class)))
-                .thenReturn(responseDto);
+        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.just("response"));
+        when(mapper.readValue(anyString(), eq(CryptomanagerResponseDto.class))).thenReturn(responseDto);
 
         onlinePacketCryptoService.encrypt("refId", "test".getBytes());
     }
 
     /**
-     * Tests encrypt method when HTTP client error exception occurs - should throw ApiNotAccessibleException
+     * Tests encrypt method when WebClientResponseException occurs - should throw ApiNotAccessibleException
      */
     @Test(expected = ApiNotAccessibleException.class)
-    public void testEncrypt_WhenHttpClientErrorException_ThrowsApiNotAccessibleException() throws Exception {
-        HttpClientErrorException clientException = new HttpClientErrorException(HttpStatus.BAD_REQUEST, "Bad Request");
-        RuntimeException wrapperException = new RuntimeException(clientException);
-
-        when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(), eq(String.class)))
-                .thenThrow(wrapperException);
+    public void testEncrypt_WhenWebClientResponseException_ThrowsApiNotAccessibleException() throws Exception {
+        WebClientResponseException ex = WebClientResponseException.create(
+                400, "Bad Request", HttpHeaders.EMPTY, "error body".getBytes(), StandardCharsets.UTF_8);
+        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.error(ex));
 
         onlinePacketCryptoService.encrypt("refId", "test".getBytes());
     }
 
     /**
-     * Tests encrypt method when HTTP server error exception occurs - should throw ApiNotAccessibleException
+     * Tests encrypt method when WebClientResponseException (5xx) occurs - should throw ApiNotAccessibleException
      */
     @Test(expected = ApiNotAccessibleException.class)
-    public void testEncrypt_WhenHttpServerErrorException_ThrowsApiNotAccessibleException() throws Exception {
-        HttpServerErrorException serverException = new HttpServerErrorException(HttpStatus.INTERNAL_SERVER_ERROR, "Server Error");
-        RuntimeException wrapperException = new RuntimeException(serverException);
-
-        when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(), eq(String.class)))
-                .thenThrow(wrapperException);
+    public void testEncrypt_WhenWebClientServerException_ThrowsApiNotAccessibleException() throws Exception {
+        WebClientResponseException ex = WebClientResponseException.create(
+                500, "Internal Server Error", HttpHeaders.EMPTY, "error body".getBytes(), StandardCharsets.UTF_8);
+        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.error(ex));
 
         onlinePacketCryptoService.encrypt("refId", "test".getBytes());
     }
@@ -396,6 +385,7 @@ public class OnlinePacketCryptoServiceTest {
      */
     @Test(expected = PacketDecryptionFailureException.class)
     public void testDecrypt_WhenIOException_ThrowsPacketDecryptionFailureException() throws Exception {
+        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.just("response"));
         when(mapper.readValue(anyString(), eq(CryptomanagerResponseDto.class)))
                 .thenThrow(new RuntimeException(new IOException("IO error")));
 
@@ -412,10 +402,8 @@ public class OnlinePacketCryptoServiceTest {
         ServiceError error = new ServiceError("ERROR_CODE", "Error message");
         responseDto.setErrors(Lists.newArrayList(error));
 
-        when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(), eq(String.class)))
-                .thenReturn(new ResponseEntity<>("response", HttpStatus.OK));
-        when(mapper.readValue(anyString(), eq(CryptomanagerResponseDto.class)))
-                .thenReturn(responseDto);
+        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.just("response"));
+        when(mapper.readValue(anyString(), eq(CryptomanagerResponseDto.class))).thenReturn(responseDto);
 
         byte[] packet = new byte[32];
         onlinePacketCryptoService.decrypt("refId", packet);
@@ -428,10 +416,8 @@ public class OnlinePacketCryptoServiceTest {
     public void testVerify_WhenPublicKeyResponseEmpty_ThrowsSignatureException() throws Exception {
         LinkedHashMap<String, Object> emptyResponse = new LinkedHashMap<>();
 
-        when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenReturn(new ResponseEntity<>("{}", HttpStatus.OK));
-        when(mapper.readValue(anyString(), eq(LinkedHashMap.class)))
-                .thenReturn(emptyResponse);
+        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.just("{}"));
+        when(mapper.readValue(anyString(), eq(LinkedHashMap.class))).thenReturn(emptyResponse);
 
         onlinePacketCryptoService.verify("center_machine", "data".getBytes(), "signature".getBytes());
     }
@@ -447,10 +433,8 @@ public class OnlinePacketCryptoServiceTest {
         responseDto.setResponse(decryptResponse);
         responseDto.setErrors(null);
 
-        when(restTemplate.exchange(anyString(), any(HttpMethod.class), any(HttpEntity.class), any(Class.class)))
-                .thenReturn(new ResponseEntity<>("response", HttpStatus.OK));
-        when(mapper.readValue(anyString(), eq(CryptomanagerResponseDto.class)))
-                .thenReturn(responseDto);
+        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.just("response"));
+        when(mapper.readValue(anyString(), eq(CryptomanagerResponseDto.class))).thenReturn(responseDto);
 
         byte[] result = onlinePacketCryptoService.encrypt("refId", "test".getBytes());
         assertNull(result);
@@ -461,19 +445,12 @@ public class OnlinePacketCryptoServiceTest {
      */
     @Test(expected = SignatureException.class)
     public void testVerify_WhenVerifyResponseEmpty_ThrowsSignatureException() throws IOException {
-        LinkedHashMap<String, Object> publicKeyResponse = new LinkedHashMap<>();
-        publicKeyResponse.put("signingPublicKey", "publicKey");
+        // Public key response has no "response" wrapper → getPublicKey() throws SignatureException
+        LinkedHashMap<String, Object> noWrapperResponse = new LinkedHashMap<>();
+        noWrapperResponse.put("signingPublicKey", "publicKey");
 
-        LinkedHashMap<String, Object> emptyVerifyResponse = new LinkedHashMap<>();
-
-        when(restTemplate.exchange(contains("machine"), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenReturn(new ResponseEntity<>("response", HttpStatus.OK));
-        when(restTemplate.exchange(not(contains("machine")).toString(), any(HttpMethod.class), any(HttpEntity.class), any(Class.class)))
-                .thenReturn(new ResponseEntity<>("response", HttpStatus.OK));
-
-        when(mapper.readValue(anyString(), eq(LinkedHashMap.class)))
-                .thenReturn(publicKeyResponse)
-                .thenReturn(emptyVerifyResponse);
+        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.just("response"));
+        when(mapper.readValue(anyString(), eq(LinkedHashMap.class))).thenReturn(noWrapperResponse);
 
         onlinePacketCryptoService.verify("center_machine", "data".getBytes(), "signature".getBytes());
     }

@@ -21,7 +21,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.web.reactive.function.client.WebClient;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.Lists;
@@ -82,8 +82,8 @@ public class PacketReaderService {
     private PacketReader packetReader;
 
     @Autowired
-    @Qualifier("selfTokenRestTemplate")
-    private RestTemplate restTemplate;
+    @Qualifier("selfTokenWebClient")
+    private WebClient webClient;
 
     @Value("#{T(java.util.Arrays).asList('${packetmanager.additional.fields.search.from.metainfo:officerBiometricFileName,supervisorBiometricFileName}')}")
     private List<String> additionalFieldsSearch;
@@ -428,7 +428,11 @@ public class PacketReaderService {
         if (mappingJson != null)
             return mappingJson;
 
-        String mappingJsonString = restTemplate.getForObject(configServerUrl + "/" + mappingjsonFileName, String.class);
+        String mappingJsonString = webClient.get()
+                .uri(configServerUrl + "/" + mappingjsonFileName)
+                .retrieve()
+                .bodyToMono(String.class)
+                .block();
         JSONObject jsonObject = objectMapper.readValue(mappingJsonString, JSONObject.class);
         LinkedHashMap combinedMap = new LinkedHashMap();
         combinedMap.putAll((Map) jsonObject.get(IDENTITY));

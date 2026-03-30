@@ -35,7 +35,8 @@ import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.springframework.test.context.junit4.SpringRunner;
 import org.springframework.test.util.ReflectionTestUtils;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.Sets;
@@ -70,12 +71,30 @@ public class PacketReaderServiceTest {
     private ObjectMapper objectMapper;
 
     @Mock
-    private RestTemplate restTemplate;
+    private WebClient webClient;
+
+    @Mock
+    @SuppressWarnings("rawtypes")
+    private WebClient.RequestHeadersUriSpec requestHeadersUriSpec;
+
+    @Mock
+    @SuppressWarnings("rawtypes")
+    private WebClient.RequestHeadersSpec requestHeadersSpec;
+
+    @Mock
+    private WebClient.ResponseSpec responseSpec;
 
     @Before
+    @SuppressWarnings("unchecked")
     public void setup() throws IOException {
         ReflectionTestUtils.setField(packetReaderService, "configServerUrl", "localhost");
         ReflectionTestUtils.setField(packetReaderService, "mappingjsonFileName", "reg-proc.json");
+
+        // GET chain for getMappingJsonFile()
+        when(webClient.get()).thenReturn(requestHeadersUriSpec);
+        when(requestHeadersUriSpec.uri(anyString())).thenReturn(requestHeadersSpec);
+        when(requestHeadersSpec.retrieve()).thenReturn(responseSpec);
+        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.just("jsonobject"));
 
         List<BIR> birTypeList = new ArrayList<>();
         BIR birType1 = new BIR.BIRBuilder().build();
@@ -100,7 +119,6 @@ public class PacketReaderServiceTest {
         biometricRecord.setSegments(birTypeList);
         when(packetReader.getBiometric(any(),any(),any(),any(),any(), anyBoolean())).thenReturn(biometricRecord);
 
-        when(restTemplate.getForObject(anyString(), any(Class.class))).thenReturn("jsonobject");
         LinkedHashMap tempMap = new LinkedHashMap();
         JSONObject jsonObject = new JSONObject();
         LinkedHashMap<String, String> val = new LinkedHashMap<>();
@@ -345,7 +363,6 @@ public class PacketReaderServiceTest {
         jsonObject.put("metaInfo", metaInfo);
         jsonObject.put("audits", audits);
 
-        when(restTemplate.getForObject(anyString(), any(Class.class))).thenReturn("jsonobject");
         when(objectMapper.readValue(anyString(), any(Class.class))).thenReturn(jsonObject);
 
         String result = packetReaderService.getSourceFromIdField("process1", "field1");
@@ -385,7 +402,6 @@ public class PacketReaderServiceTest {
         jsonObject.put("metaInfo", metaInfo);
         jsonObject.put("audits", audits);
 
-        when(restTemplate.getForObject(anyString(), any(Class.class))).thenReturn("jsonobject");
         when(objectMapper.readValue(anyString(), any(Class.class))).thenReturn(jsonObject);
 
         String result = packetReaderService.searchInMappingJson("field1", "process1");

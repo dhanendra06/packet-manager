@@ -25,7 +25,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.util.UriComponents;
 import org.springframework.web.util.UriComponentsBuilder;
 
@@ -84,8 +84,8 @@ public class IdSchemaUtils {
     private ObjectMapper objMapper;
 
     @Autowired
-    @Qualifier("selfTokenRestTemplate")
-    private RestTemplate restTemplate;
+    @Qualifier("selfTokenWebClient")
+    private WebClient webClient;
 
 
     /**
@@ -121,7 +121,11 @@ public class IdSchemaUtils {
             builder.queryParam(PacketManagerConstants.SCHEMA_VERSION_QUERY_PARAM, version);
         UriComponents uriComponents = builder.build(false).encode();
 
-        String response = restTemplate.getForObject(uriComponents.toUri(), String.class);
+        String response = webClient.get()
+                .uri(uriComponents.toUri())
+                .retrieve()
+                .bodyToMono(String.class)
+                .block();
         String responseString = null;
         try {
             JSONObject jsonObject = new JSONObject(response);
@@ -252,7 +256,11 @@ public class IdSchemaUtils {
     public org.json.simple.JSONObject getMappingJson() throws IOException {
 
         if (mappingJsonObject == null) {
-            String mappingJsonString = restTemplate.getForObject(configServerUrl + "/" + mappingjsonFileName, String.class);
+            String mappingJsonString = webClient.get()
+                    .uri(configServerUrl + "/" + mappingjsonFileName)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
             mappingJsonObject = objMapper.readValue(mappingJsonString, org.json.simple.JSONObject.class);
 
         }

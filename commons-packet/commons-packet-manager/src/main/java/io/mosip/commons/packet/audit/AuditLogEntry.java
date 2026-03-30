@@ -12,11 +12,8 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.env.Environment;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.web.reactive.function.client.WebClient;
 
 import io.mosip.commons.packet.constants.LoggerFileConstant;
 import io.mosip.commons.packet.dto.packet.AuditRequestDto;
@@ -41,9 +38,8 @@ public class AuditLogEntry {
 			"mosip.utc-datetime-pattern";
 
 	@Autowired
-	@Lazy
-	@Qualifier("selfTokenRestTemplate")
-	private RestTemplate restTemplate;
+	@Qualifier("selfTokenWebClient")
+	private WebClient webClient;
 
 	@Autowired
 	private Environment env;
@@ -138,18 +134,12 @@ public class AuditLogEntry {
 
 				requestWrapper.setVersion(APPLICATION_VERSION);
 
-				HttpEntity<RequestWrapper<AuditRequestDto>> httpEntity =
-						new HttpEntity<>(requestWrapper);
-
-				ResponseEntity<String> response =
-						restTemplate.exchange(
-								auditLogUrl,
-								HttpMethod.POST,
-								httpEntity,
-								String.class
-						);
-
-				return response.getBody();
+				return webClient.post()
+						.uri(auditLogUrl)
+						.bodyValue(requestWrapper)
+						.retrieve()
+						.bodyToMono(String.class)
+						.block();
 
 			} catch (Exception e) {
 
