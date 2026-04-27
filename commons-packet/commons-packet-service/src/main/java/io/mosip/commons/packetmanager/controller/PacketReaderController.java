@@ -5,10 +5,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import io.mosip.commons.packet.util.PacketManagerLogger;
 import io.mosip.commons.packetmanager.dto.SourceProcessDto;
-import io.mosip.kernel.core.logger.spi.Logger;
-import io.mosip.kernel.core.util.DateUtils2;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -36,6 +35,7 @@ import io.mosip.kernel.biometrics.entities.BiometricRecord;
 import io.mosip.kernel.core.http.RequestWrapper;
 import io.mosip.kernel.core.http.ResponseFilter;
 import io.mosip.kernel.core.http.ResponseWrapper;
+import io.mosip.kernel.core.util.DateUtils;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -48,10 +48,10 @@ import io.swagger.v3.oas.annotations.media.Schema;
 @Tag(name = "packet-reader-controller", description = "Packet Reader Controller")
 public class PacketReaderController {
 
+    private static final Logger logger = LoggerFactory.getLogger(PacketReaderController.class);
+
     @Autowired
     private PacketReader packetReader;
-
-    private static Logger LOGGER = PacketManagerLogger.getLogger(PacketReaderController.class);
 
     @Autowired
     private PacketReaderService packetReaderService;
@@ -64,17 +64,21 @@ public class PacketReaderController {
             @ApiResponse(responseCode = "401", description = "Unauthorized", content = @Content(schema = @Schema(hidden = true))),
             @ApiResponse(responseCode = "403", description = "Forbidden", content = @Content(schema = @Schema(hidden = true))),
             @ApiResponse(responseCode = "404", description = "Not Found", content = @Content(schema = @Schema(hidden = true))) })
-    public ResponseWrapper<FieldResponseDto> searchField(@RequestBody(required = true) RequestWrapper<FieldDto> fieldDto) {
+        public ResponseWrapper<FieldResponseDto> searchField(@RequestBody(required = true) RequestWrapper<FieldDto> fieldDto) {
+        logger.info("searchField :: start");
+        long startTime = System.currentTimeMillis();
         SourceProcessDto sourceProcessDto = packetReaderService.getSourceAndProcess(fieldDto.getRequest().getId(),
                 fieldDto.getRequest().getField(), fieldDto.getRequest().getSource(), fieldDto.getRequest().getProcess());
         String resultField = sourceProcessDto == null ? null :
                 packetReader.getField(fieldDto.getRequest().getId(),
-                        fieldDto.getRequest().getField(), sourceProcessDto.getSource(), sourceProcessDto.getProcess(), fieldDto.getRequest().getBypassCache());
+                fieldDto.getRequest().getField(), sourceProcessDto.getSource(), sourceProcessDto.getProcess(), fieldDto.getRequest().getBypassCache());
         ResponseWrapper<FieldResponseDto> response = new ResponseWrapper<FieldResponseDto>();
         Map<String, String> responseMap = new HashMap<>();
         responseMap.put(fieldDto.getRequest().getField(), resultField);
         FieldResponseDto fieldResponseDto = new FieldResponseDto(responseMap);
+
         response.setResponse(fieldResponseDto);
+        logger.info("searchField :: end - time taken: {} ms", System.currentTimeMillis() - startTime);
         return response;
     }
 
@@ -88,26 +92,25 @@ public class PacketReaderController {
             @ApiResponse(responseCode = "403", description = "Forbidden", content = @Content(schema = @Schema(hidden = true))),
             @ApiResponse(responseCode = "404", description = "Not Found", content = @Content(schema = @Schema(hidden = true))) })
     public ResponseWrapper<FieldResponseDto> searchFields(@RequestBody(required = true) RequestWrapper<FieldDtos> request)  {
+        logger.info("searchFields :: start");
+        long startTime = System.currentTimeMillis();
         FieldDtos fieldDtos = request.getRequest();
-        String rid = fieldDtos != null ? fieldDtos.getId() : null;
         Map<String, String> resultFields = new HashMap<>();
         if ((fieldDtos.getSource()) == null) {
-            // Fetch info once for source resolution; reuse across all fields
-            // to avoid N redundant S3 listObjectsV2 calls (one per field).
-            InfoResponseDto cachedInfo = packetReaderService.getInfoForSourceResolution(fieldDtos.getId());
             for (String field : fieldDtos.getFields()) {
                 SourceProcessDto sourceProcessDto = packetReaderService.getSourceAndProcess(fieldDtos.getId(),
-                        field, fieldDtos.getSource(), fieldDtos.getProcess(), cachedInfo);
+                        field, fieldDtos.getSource(), fieldDtos.getProcess());
                 String value = sourceProcessDto == null ? null :
                         packetReader.getField(fieldDtos.getId(), field, sourceProcessDto.getSource(),
-                                sourceProcessDto.getProcess(), fieldDtos.getBypassCache());
+                        sourceProcessDto.getProcess(), fieldDtos.getBypassCache());
                 resultFields.put(field, value);
             }
         } else
-            resultFields = packetReader.getFields(fieldDtos.getId(), fieldDtos.getFields(), fieldDtos.getSource(), fieldDtos.getProcess(), fieldDtos.getBypassCache());
+        resultFields = packetReader.getFields(fieldDtos.getId(), fieldDtos.getFields(), fieldDtos.getSource(), fieldDtos.getProcess(), fieldDtos.getBypassCache());
         FieldResponseDto resultField = new FieldResponseDto(resultFields);
         ResponseWrapper<FieldResponseDto> response = new ResponseWrapper<FieldResponseDto>();
         response.setResponse(resultField);
+        logger.info("searchFields :: end - time taken: {} ms", System.currentTimeMillis() - startTime);
         return response;
     }
 
@@ -121,16 +124,18 @@ public class PacketReaderController {
             @ApiResponse(responseCode = "403", description = "Forbidden", content = @Content(schema = @Schema(hidden = true))),
             @ApiResponse(responseCode = "404", description = "Not Found", content = @Content(schema = @Schema(hidden = true))) })
     public ResponseWrapper<Document> getDocument(@RequestBody(required = true) RequestWrapper<DocumentDto> request) {
+        logger.info("getDocument :: start");
+        long startTime = System.currentTimeMillis();
         DocumentDto documentDto = request.getRequest();
         SourceProcessDto sourceProcessDto = packetReaderService.getSourceAndProcess(documentDto.getId(),
                 documentDto.getDocumentName(), documentDto.getSource(), documentDto.getProcess());
         Document document = sourceProcessDto == null ? null :
                 packetReader.getDocument(documentDto.getId(), documentDto.getDocumentName(),
-                        sourceProcessDto.getSource(), sourceProcessDto.getProcess());
+                sourceProcessDto.getSource(), sourceProcessDto.getProcess());
         ResponseWrapper<Document> response = new ResponseWrapper<Document>();
         response.setResponse(document);
+        logger.info("getDocument :: end - time taken: {} ms", System.currentTimeMillis() - startTime);
         return response;
-
     }
 
     @ResponseFilter
@@ -143,18 +148,19 @@ public class PacketReaderController {
             @ApiResponse(responseCode = "403", description = "Forbidden", content = @Content(schema = @Schema(hidden = true))),
             @ApiResponse(responseCode = "404", description = "Not Found", content = @Content(schema = @Schema(hidden = true))) })
     public ResponseWrapper<BiometricRecord> getBiometrics(@RequestBody(required = true) RequestWrapper<BiometricRequestDto> request) {
+        logger.info("getBiometrics :: start");
+        long startTime = System.currentTimeMillis();
         BiometricRequestDto bioRequest = request.getRequest();
-
         SourceProcessDto sourceProcessDto = packetReaderService.getSourceAndProcess(bioRequest.getId(),
                 bioRequest.getPerson(), bioRequest.getSource(), bioRequest.getProcess());
         List<String> modalities = bioRequest.getModalities() == null ? Lists.newArrayList() : bioRequest.getModalities();
         BiometricRecord responseDto = sourceProcessDto == null ? null :
                 packetReader.getBiometric(bioRequest.getId(), bioRequest.getPerson(), modalities,
-                        sourceProcessDto.getSource(), sourceProcessDto.getProcess(), bioRequest.isBypassCache());
+                sourceProcessDto.getSource(), sourceProcessDto.getProcess(), bioRequest.isBypassCache());
         ResponseWrapper<BiometricRecord> response = getResponseWrapper();
         response.setResponse(responseDto);
+        logger.info("getBiometrics :: end - time taken: {} ms", System.currentTimeMillis() - startTime);
         return response;
-
     }
 
     @ResponseFilter
@@ -167,6 +173,8 @@ public class PacketReaderController {
             @ApiResponse(responseCode = "403", description = "Forbidden", content = @Content(schema = @Schema(hidden = true))),
             @ApiResponse(responseCode = "404", description = "Not Found", content = @Content(schema = @Schema(hidden = true))) })
     public ResponseWrapper<FieldResponseDto> getMetaInfo(@RequestBody(required = true) RequestWrapper<InfoDto> request) {
+        logger.info("getMetaInfo :: start");
+        long startTime = System.currentTimeMillis();
         InfoDto metaDto = request.getRequest();
         SourceProcessDto sourceProcessDto = packetReaderService.getSourceAndProcess(metaDto.getId(), metaDto.getSource(), metaDto.getProcess());
         Map<String, String> resultFields = packetReader.getMetaInfo(metaDto.getId(),
@@ -174,8 +182,8 @@ public class PacketReaderController {
         FieldResponseDto resultField = new FieldResponseDto(resultFields);
         ResponseWrapper<FieldResponseDto> response = getResponseWrapper();
         response.setResponse(resultField);
+        logger.info("getMetaInfo :: end - time taken: {} ms", System.currentTimeMillis() - startTime);
         return response;
-
     }
 
     @ResponseFilter
@@ -188,28 +196,23 @@ public class PacketReaderController {
             @ApiResponse(responseCode = "403", description = "Forbidden", content = @Content(schema = @Schema(hidden = true))),
             @ApiResponse(responseCode = "404", description = "Not Found", content = @Content(schema = @Schema(hidden = true))) })
     public ResponseWrapper<List<FieldResponseDto>> getAudits(@RequestBody(required = true) RequestWrapper<InfoDto> request) {
-        long startMs = System.currentTimeMillis();
+        logger.info("getAudits :: start");
+        long startTime = System.currentTimeMillis();
         InfoDto metaDto = request.getRequest();
-        String rid = metaDto != null ? metaDto.getId() : null;
-        LOGGER.info("getAudits entered | RID=" + rid);
-        try {
-            SourceProcessDto sourceProcessDto = packetReaderService.getSourceAndProcess(metaDto.getId(), metaDto.getSource(), metaDto.getProcess());
-            List<Map<String, String>> resultFields = packetReader.getAudits(metaDto.getId(),
-                    sourceProcessDto.getSource(), sourceProcessDto.getProcess(), metaDto.getBypassCache());
-            List<FieldResponseDto> resultField = new ArrayList<>();
-            if (resultFields != null && !resultFields.isEmpty()) {
-                resultFields.stream().forEach(e -> {
-                    FieldResponseDto fieldResponseDto = new FieldResponseDto(e);
-                    resultField.add(fieldResponseDto);
-                });
-            }
-            ResponseWrapper<List<FieldResponseDto>> response = getResponseWrapper();
-            response.setResponse(resultField);
-            return response;
-        } finally {
-            long timeMs = System.currentTimeMillis() - startMs;
-            LOGGER.info("getAudits completed | RID=" + rid + " timeMs=" + timeMs);
+        SourceProcessDto sourceProcessDto = packetReaderService.getSourceAndProcess(metaDto.getId(), metaDto.getSource(), metaDto.getProcess());
+        List<Map<String, String>> resultFields = packetReader.getAudits(metaDto.getId(),
+                sourceProcessDto.getSource(), sourceProcessDto.getProcess(), metaDto.getBypassCache());
+        List<FieldResponseDto> resultField = new ArrayList<>();
+        if (resultFields != null && !resultFields.isEmpty()) {
+            resultFields.stream().forEach(e -> {
+                FieldResponseDto fieldResponseDto = new FieldResponseDto(e);
+                resultField.add(fieldResponseDto);
+            });
         }
+        ResponseWrapper<List<FieldResponseDto>> response = getResponseWrapper();
+        response.setResponse(resultField);
+        logger.info("getAudits :: end - time taken: {} ms", System.currentTimeMillis() - startTime);
+        return response;
     }
 
     @ResponseFilter
@@ -222,32 +225,36 @@ public class PacketReaderController {
             @ApiResponse(responseCode = "403", description = "Forbidden", content = @Content(schema = @Schema(hidden = true))),
             @ApiResponse(responseCode = "404", description = "Not Found", content = @Content(schema = @Schema(hidden = true))) })
     public ResponseWrapper<ValidatePacketResponse> validatePacket(@RequestBody(required = true) RequestWrapper<InfoDto> request) {
+        logger.info("validatePacket :: start");
+        long startTime = System.currentTimeMillis();
         InfoDto metaDto = request.getRequest();
         SourceProcessDto sourceProcessDto = packetReaderService.getSourceAndProcess(metaDto.getId(), metaDto.getSource(), metaDto.getProcess());
         boolean resultFields = packetReader.validatePacket(metaDto.getId(), sourceProcessDto.getSource(), sourceProcessDto.getProcess());
         ResponseWrapper<ValidatePacketResponse> response = getResponseWrapper();
         response.setResponse(new ValidatePacketResponse(resultFields));
+        logger.info("validatePacket :: end - time taken: {} ms", System.currentTimeMillis() - startTime);
         return response;
-
     }
 
     @PreAuthorize("hasAnyRole(@authorizedRoles.getPostgettags())")
     @ResponseFilter
-    @PostMapping(path = "/getTags", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+	@PostMapping(path = "/getTags", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     @Operation(summary = "getTags", description = "getTags", tags = { "packet-reader-controller" })
     @ApiResponses(value = { @ApiResponse(responseCode = "200", description = "OK"),
             @ApiResponse(responseCode = "201", description = "Created", content = @Content(schema = @Schema(hidden = true))),
             @ApiResponse(responseCode = "401", description = "Unauthorized", content = @Content(schema = @Schema(hidden = true))),
             @ApiResponse(responseCode = "403", description = "Forbidden", content = @Content(schema = @Schema(hidden = true))),
             @ApiResponse(responseCode = "404", description = "Not Found", content = @Content(schema = @Schema(hidden = true))) })
-    public ResponseWrapper<TagResponseDto> getTags(
-            @RequestBody(required = true) RequestWrapper<TagRequestDto> request) {
-        String rid = request.getRequest() != null ? request.getRequest().getId() : null;
-        TagResponseDto tagResponseDto = packetReaderService.getTags(request.getRequest());
-        ResponseWrapper<TagResponseDto> response = getResponseWrapper();
-        response.setResponse(tagResponseDto);
-        return response;
-    }
+	public ResponseWrapper<TagResponseDto> getTags(
+			@RequestBody(required = true) RequestWrapper<TagRequestDto> request) {
+		logger.info("getTags :: start");
+		long startTime = System.currentTimeMillis();
+		TagResponseDto tagResponseDto = packetReaderService.getTags(request.getRequest());
+		ResponseWrapper<TagResponseDto> response = getResponseWrapper();
+		response.setResponse(tagResponseDto);
+		logger.info("getTags :: end - time taken: {} ms", System.currentTimeMillis() - startTime);
+		return response;
+	}
 
     @ResponseFilter
     @PreAuthorize("hasAnyRole(@authorizedRoles.getPostinfo())")
@@ -259,12 +266,15 @@ public class PacketReaderController {
             @ApiResponse(responseCode = "403", description = "Forbidden", content = @Content(schema = @Schema(hidden = true))),
             @ApiResponse(responseCode = "404", description = "Not Found", content = @Content(schema = @Schema(hidden = true))) })
     public ResponseWrapper<InfoResponseDto> info(@RequestBody(required = true) RequestWrapper<InfoRequestDto> request) {
-        String rid = request.getRequest() != null ? request.getRequest().getId() : null;
+        logger.info("info :: start");
+        long startTime = System.currentTimeMillis();
+        String id = request.getRequest().getId();
         InfoResponseDto resultFields = null;
-        if (rid != null && !rid.isEmpty())
-            resultFields = packetReaderService.info(rid);
+        if (id != null && !id.isEmpty())
+            resultFields = packetReaderService.info(id);
         ResponseWrapper<InfoResponseDto> response = getResponseWrapper();
         response.setResponse(resultFields);
+        logger.info("info :: end - time taken: {} ms", System.currentTimeMillis() - startTime);
         return response;
     }
 
@@ -272,7 +282,7 @@ public class PacketReaderController {
         ResponseWrapper<Object> response = new ResponseWrapper<>();
         response.setId("mosip.registration.packet.reader");
         response.setVersion("v1");
-        response.setResponsetime(DateUtils2.getUTCCurrentDateTime());
+        response.setResponsetime(DateUtils.getUTCCurrentDateTime());
         return response;
     }
 }
