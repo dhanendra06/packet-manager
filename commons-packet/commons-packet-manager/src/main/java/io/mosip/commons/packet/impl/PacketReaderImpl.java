@@ -17,10 +17,8 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
-import java.util.concurrent.Executor;
-import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.*;
+
 import io.mosip.commons.packet.facade.PacketReader;
 import io.mosip.kernel.biometrics.constant.BiometricType;
 import io.mosip.kernel.core.util.JsonUtils;
@@ -75,12 +73,20 @@ public class PacketReaderImpl implements IPacketReader {
 	@Value("${mosip.commons.packetnames}")
 	private String packetNames;
 
+	@Value("${packetmanager.fetch.concurrency.limit:35}")
+	private int fetchConcurrencyLimit;
+
 	// Split once at startup — avoids String.split() allocation on every request under high load
 	private volatile String[] packetNameArray;
+
+	private Semaphore fetchSemaphore;
 
 	@PostConstruct
 	public void init() {
 		packetNameArray = packetNames.split(",");
+		fetchSemaphore = new Semaphore(fetchConcurrencyLimit, true);
+		LOGGER.info(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID, null,
+				"PacketReaderImpl fetch concurrency limit set to " + fetchConcurrencyLimit);
 	}
 
 	/**
@@ -96,6 +102,22 @@ public class PacketReaderImpl implements IPacketReader {
 			packetNameArray = arr;
 		}
 		return arr;
+	}
+	/**
+	 * Lazy accessor for fetchSemaphore.
+	 * In production, @PostConstruct initializes this with the configured limit.
+	 * In tests using @InjectMocks, @PostConstruct is skipped, so we initialize
+	 * on first access using fetchConcurrencyLimit (injected by @InjectMocks if
+	 * @Value is honored, otherwise defaults to 0 → falls back to 40).
+	 */
+	private Semaphore getFetchSemaphore() {
+		Semaphore s = fetchSemaphore;
+		if (s == null) {
+			int limit = fetchConcurrencyLimit > 0 ? fetchConcurrencyLimit : 40;
+			s = new Semaphore(limit, true);
+			fetchSemaphore = s;
+		}
+		return s;
 	}
 
 	@Autowired
@@ -157,7 +179,10 @@ public class PacketReaderImpl implements IPacketReader {
 				"Getting all fields :: entry");
 
 		Map<String, Object> finalMap = new LinkedHashMap<>();
-
+		// Semaphore guards cache-miss path only: @Cacheable intercepts before reaching
+		// this method body on a hit, so the permit is released almost immediately on hits.
+		// On a miss this downloads full packet bytes into heap — concurrency cap prevents OOM.
+		getFetchSemaphore().acquireUninterruptibly();
 		try {
 			Executor exec = packetFetchExecutor != null ? packetFetchExecutor : ForkJoinPool.commonPool();
 			String[] names = getPacketNames();
@@ -269,6 +294,9 @@ public class PacketReaderImpl implements IPacketReader {
 			}
 
 			throw new GetAllIdentityException(e.getMessage());
+		}finally {
+			getFetchSemaphore().release();
+
 		}
 
         return finalMap;
@@ -454,7 +482,7 @@ public class PacketReaderImpl implements IPacketReader {
 	@Override
 	public Map<String, String> getMetaInfo(String id, String source, String process) {
 		Map<String, String> finalMap = new LinkedHashMap<>();
-
+		getFetchSemaphore().acquireUninterruptibly();
 		try {
 			Executor exec = packetFetchExecutor != null ? packetFetchExecutor : ForkJoinPool.commonPool();
 			String[] names = getPacketNames();
@@ -510,6 +538,8 @@ public class PacketReaderImpl implements IPacketReader {
 				throw new GetAllMetaInfoException(ex.getErrorCode(), ex.getMessage());
 			}
 			throw new GetAllMetaInfoException(e.getMessage());
+		}finally {
+			getFetchSemaphore().release();
 		}
 		return finalMap;
 	}
@@ -518,7 +548,7 @@ public class PacketReaderImpl implements IPacketReader {
 	public List<Map<String, String>> getAuditInfo(String id, String source, String process) {
 		LOGGER.info(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID, id, "getAuditInfo :: entry");
 		List<Map<String, String>> finalMap = new ArrayList<>();
-
+		getFetchSemaphore().acquireUninterruptibly();
 		try {
 			Executor exec = packetFetchExecutor != null ? packetFetchExecutor : ForkJoinPool.commonPool();
 			String[] names = getPacketNames();
@@ -567,6 +597,8 @@ public class PacketReaderImpl implements IPacketReader {
 				throw new GetAllIdentityException(ex.getErrorCode(), ex.getMessage());
 			}
 			throw new GetAllIdentityException(e.getMessage());
+		}finally {
+			getFetchSemaphore().release();
 		}
 		return finalMap;
 	}

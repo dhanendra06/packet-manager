@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.Semaphore;
 import java.util.stream.Collectors;
 
 import io.mosip.commons.packet.exception.GetAllIdentityException;
@@ -25,6 +26,7 @@ import io.mosip.kernel.core.exception.BaseCheckedException;
 import io.mosip.kernel.core.exception.BaseUncheckedException;
 import io.mosip.kernel.core.exception.ExceptionUtils;
 import io.mosip.kernel.core.util.HMACUtils2;
+import jakarta.annotation.PostConstruct;
 import org.apache.commons.io.IOUtils;
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -95,23 +97,46 @@ public class PacketValidator {
     @Qualifier("packetValidateExecutor")
     private Executor packetValidateExecutor;
 
+    /**
+     * Max concurrent validatePacket operations allowed simultaneously.
+     * Each validate() downloads all sub-packets into heap (several MB each).
+     * Too many concurrent validates exhaust heap → OOM.
+     * Default 30: at ~10MB per validate, keeps peak validate heap ≤ 300MB.
+     * Tune based on available heap: limit ≈ (heapMB × 0.4) / avgPacketSizeMB.
+     */
+    @Value("${packetmanager.validate.concurrency.limit:30}")
+    private int validateConcurrencyLimit;
+
+    private Semaphore validateSemaphore;
+
+    @PostConstruct
+    private void initSemaphore() {
+        validateSemaphore = new Semaphore(validateConcurrencyLimit, true);
+        LOGGER.info(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID, null,
+                "PacketValidator concurrency limit set to " + validateConcurrencyLimit);
+    }
 
     public boolean validate(String id, String source, String process) throws IdObjectIOException, InvalidIdSchemaException, IOException, JsonProcessingException, PacketKeeperException, NoSuchAlgorithmException, JSONException {
         // Fetch all sub-packets ONCE and reuse for both schema validation and checksum
         // validation — avoids a second round of S3 GET + decrypt calls.
-        Map<String, Packet> packetsMap = fetchAllPacketsInParallel(id, source, process);
-        Map<String, Object> identityFields = extractIdentityFields(packetsMap);
+        validateSemaphore.acquireUninterruptibly();
+        try {
+            Map<String, Packet> packetsMap = fetchAllPacketsInParallel(id, source, process);
+            Map<String, Object> identityFields = extractIdentityFields(packetsMap);
 
-        boolean result = validateSchema(id, process, identityFields);
-        if (result) {
-            LOGGER.info(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID, id, "Id object validation successful for process name : " + process);
-            auditLogEntry.addAudit("Id object validation successful", eventId, eventName, eventType, null, null, id);
-            result = fileAndChecksumValidation(id, source, process, packetsMap);
-        } else {
-            LOGGER.error(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID, id, "Id object validation failed for process name : " + process);
-            auditLogEntry.addAudit("Id object validation failed", eventId, eventName, eventType, null, null, id);
+            boolean result = validateSchema(id, process, identityFields);
+            if (result) {
+                LOGGER.info(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID, id, "Id object validation successful for process name : " + process);
+                auditLogEntry.addAudit("Id object validation successful", eventId, eventName, eventType, null, null, id);
+                result = fileAndChecksumValidation(id, source, process, packetsMap);
+            } else {
+                LOGGER.error(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID, id, "Id object validation failed for process name : " + process);
+                auditLogEntry.addAudit("Id object validation failed", eventId, eventName, eventType, null, null, id);
+            }
+            return result;
+        }finally {
+            validateSemaphore.release();
         }
-        return result;
     }
 
     /**
