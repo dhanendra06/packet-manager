@@ -17,6 +17,11 @@ public class AsyncConfig {
     @Value("${packetmanager.fetch.thread.pool.size:40}")
     private int fetchPoolSize;
 
+    // Max burst size for fetch pool. Virtual threads are cheap, so this can be set high.
+    // When all core threads are busy, the pool grows up to this limit before CallerRunsPolicy fires.
+    @Value("${packetmanager.fetch.max.thread.pool.size:160}")
+    private int fetchMaxPoolSize;
+
     @Value("${packetmanager.fetch.queue.capacity:200}")
     private int fetchQueueCapacity;
 
@@ -26,8 +31,16 @@ public class AsyncConfig {
     @Value("${packetmanager.validate.thread.pool.size:30}")
     private int validatePoolSize;
 
+    // Max burst size for validate pool.
+    @Value("${packetmanager.validate.max.thread.pool.size:100}")
+    private int validateMaxPoolSize;
+
     @Value("${packetmanager.validate.queue.capacity:150}")
     private int validateQueueCapacity;
+
+    // Idle burst threads are reclaimed after this many seconds of inactivity.
+    @Value("${packetmanager.thread.keep.alive.seconds:60}")
+    private int keepAliveSeconds;
 
     private ExecutorService auditPool;
     private ExecutorService fetchPool;
@@ -49,44 +62,49 @@ public class AsyncConfig {
     }
 
     /**
-     * Bounded platform-thread pool for parallel sub-packet S3 fetches (reads).
-     * CallerRunsPolicy: when the queue is full the HTTP thread executes the task itself,
-     * providing natural backpressure — no Tomcat thread blocks waiting for a permit,
-     * and the queue never grows unbounded.
+     * Virtual-thread pool for parallel sub-packet S3 fetches (reads).
+     *
+     * Virtual threads (Java 21+): when a virtual thread blocks on an S3 / keymanager HTTP call,
+     * the underlying carrier (platform) thread is unmounted and freed — Tomcat threads are never
+     * starved by I/O waits. The pool can burst from fetchPoolSize (core) up to fetchMaxPoolSize
+     * before CallerRunsPolicy fires, giving substantial headroom under load.
      *
      * Tune via:
-     *   packetmanager.fetch.thread.pool.size    (default 40)  — concurrent S3 fetches
-     *   packetmanager.fetch.queue.capacity      (default 200) — max queued tasks before CallerRuns kicks in
+     *   packetmanager.fetch.thread.pool.size        (default  40)  — core concurrent S3 fetches
+     *   packetmanager.fetch.max.thread.pool.size    (default 200)  — max burst size
+     *   packetmanager.fetch.queue.capacity          (default 200)  — queue before burst threads spin up
+     *   packetmanager.thread.keep.alive.seconds     (default  60)  — idle burst-thread TTL
      */
     @Bean(name = "packetFetchExecutor")
     public ExecutorService packetFetchExecutor() {
         fetchPool = new ThreadPoolExecutor(
                 fetchPoolSize,
-                fetchPoolSize,
-                0L, TimeUnit.MILLISECONDS,
+                fetchMaxPoolSize,
+                keepAliveSeconds, TimeUnit.SECONDS,
                 new ArrayBlockingQueue<>(fetchQueueCapacity),
-                Thread.ofPlatform().name("pkt-fetch-", 0).factory(),
+                Thread.ofVirtual().name("pkt-fetch-", 0).factory(),
                 new ThreadPoolExecutor.CallerRunsPolicy());
         return fetchPool;
     }
 
     /**
-     * Bounded platform-thread pool for parallel sub-packet S3 fetches during validation.
+     * Virtual-thread pool for parallel sub-packet S3 fetches during validation.
      * Separate from packetFetchExecutor so validate concurrency can be tuned independently.
-     * CallerRunsPolicy provides backpressure when the queue is full.
      *
      * Tune via:
-     *   packetmanager.validate.thread.pool.size  (default 30)  — concurrent validate fetches
-     *   packetmanager.validate.queue.capacity    (default 150) — max queued tasks before CallerRuns kicks in
+     *   packetmanager.validate.thread.pool.size      (default  30) — core concurrent validate fetches
+     *   packetmanager.validate.max.thread.pool.size  (default 150) — max burst size
+     *   packetmanager.validate.queue.capacity        (default 150) — queue before burst threads spin up
+     *   packetmanager.thread.keep.alive.seconds      (default  60) — idle burst-thread TTL
      */
     @Bean(name = "packetValidateExecutor")
     public ExecutorService packetValidateExecutor() {
         validatePool = new ThreadPoolExecutor(
                 validatePoolSize,
-                validatePoolSize,
-                0L, TimeUnit.MILLISECONDS,
+                validateMaxPoolSize,
+                keepAliveSeconds, TimeUnit.SECONDS,
                 new ArrayBlockingQueue<>(validateQueueCapacity),
-                Thread.ofPlatform().name("pkt-validate-", 0).factory(),
+                Thread.ofVirtual().name("pkt-validate-", 0).factory(),
                 new ThreadPoolExecutor.CallerRunsPolicy());
         return validatePool;
     }

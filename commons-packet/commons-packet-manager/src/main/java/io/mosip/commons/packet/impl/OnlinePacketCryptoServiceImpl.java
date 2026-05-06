@@ -37,12 +37,19 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Component
 @Qualifier("OnlinePacketCryptoServiceImpl")
 public class OnlinePacketCryptoServiceImpl implements IPacketCryptoService {
 
     private static Logger LOGGER = PacketManagerLogger.getLogger(OnlinePacketCryptoServiceImpl.class);
+
+    // SecureRandom is thread-safe; reusing one instance avoids per-call entropy seeding overhead
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+
+    // TPM public keys are machine-specific and stable; cache them to avoid a syncdata HTTP call on every verify()
+    private final ConcurrentHashMap<String, String> publicKeyCache = new ConcurrentHashMap<>();
 
     /**
      * The Constant APPLICATION_ID.
@@ -127,11 +134,10 @@ public class OnlinePacketCryptoServiceImpl implements IPacketCryptoService {
             cryptomanagerRequestDto.setReferenceId(refId);
             cryptomanagerRequestDto.setPrependThumbprint(isPrependThumbprintEnabled);
 
-            SecureRandom sRandom = new SecureRandom();
             byte[] nonce = new byte[CryptomanagerConstant.GCM_NONCE_LENGTH];
             byte[] aad = new byte[CryptomanagerConstant.GCM_AAD_LENGTH];
-            sRandom.nextBytes(nonce);
-            sRandom.nextBytes(aad);
+            SECURE_RANDOM.nextBytes(nonce);
+            SECURE_RANDOM.nextBytes(aad);
             cryptomanagerRequestDto.setAad(CryptoUtil.encodeToURLSafeBase64(aad));
             cryptomanagerRequestDto.setSalt(CryptoUtil.encodeToURLSafeBase64(nonce));
             cryptomanagerRequestDto.setTimeStamp(DateUtils2.getUTCCurrentDateTime());
@@ -314,15 +320,24 @@ public class OnlinePacketCryptoServiceImpl implements IPacketCryptoService {
 
 	private String getPublicKey(String refId) throws IOException {
         String machineId = refId.split("_")[1];
+        String cached = publicKeyCache.get(machineId);
+        if (cached != null) {
+            LOGGER.info(PacketManagerLogger.SESSIONID, PacketManagerLogger.REFERENCEID, refId,
+                    "PERF Syncdata getTpmPublicKey served from cache for machineId: " + machineId);
+            return cached;
+        }
         long tpmKeyStart = System.currentTimeMillis();
 		ResponseEntity<String> response = restTemplate.exchange(syncdataGetTpmKeyUrl+machineId, HttpMethod.GET, null,
                 String.class);
         LOGGER.info(PacketManagerLogger.SESSIONID, PacketManagerLogger.REFERENCEID, refId,
                 "PERF Syncdata getTpmPublicKey call took " + (System.currentTimeMillis() - tpmKeyStart) + " ms");
 		 LinkedHashMap responseMap = (LinkedHashMap) mapper.readValue(response.getBody(), LinkedHashMap.class).get("response");//.get("signature");
-		 if (responseMap != null && responseMap.size() > 0)
-             return (String) responseMap.get("signingPublicKey");
-         else {
+		 if (responseMap != null && responseMap.size() > 0) {
+             String publicKey = (String) responseMap.get("signingPublicKey");
+             if (publicKey != null)
+                 publicKeyCache.put(machineId, publicKey);
+             return publicKey;
+         } else {
              LOGGER.error(PacketManagerLogger.SESSIONID, PacketManagerLogger.REFERENCEID, refId,
                      "Failed to get public key. Error Response : " + response.getBody());
              throw new SignatureException();

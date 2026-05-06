@@ -5,6 +5,7 @@ import java.io.InputStream;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import io.mosip.commons.packet.exception.ObjectDoesnotExistsException;
 import org.apache.commons.io.IOUtils;
@@ -48,6 +49,11 @@ public class PacketKeeper {
     private static Logger LOGGER = PacketManagerLogger.getLogger(PacketKeeper.class);
     private static final String OBJECT_DOESNOT_EXISTS = "The specified key does not exist";
     private static final String STATUS_404 = "Status Code: 404";
+
+    // Caches the fully-populated PacketInfo (refId, signature, encryptedHash) per packet key.
+    // PacketInfo is tiny (~200 bytes of strings) — safe to hold in memory.
+    // Allows subsequent getPacket() calls to skip the extra getMetaData() S3 call (Fix 7).
+    private final ConcurrentHashMap<String, PacketInfo> packetInfoCache = new ConcurrentHashMap<>();
 
     @Value("${packet.manager.account.name}")
     private String PACKET_MANAGER_ACCOUNT;
@@ -141,6 +147,8 @@ public class PacketKeeper {
      */
     public Packet getPacket(PacketInfo packetInfo) throws PacketKeeperException {
         String packetName = getName(packetInfo.getId(), packetInfo.getPacketName());
+        String metaCacheKey = packetInfo.getId() + "_" + packetInfo.getPacketName() + "_"
+                + packetInfo.getSource() + "_" + packetInfo.getProcess();
         try {
             long s3GetStart = System.currentTimeMillis();
             InputStream isRaw = getAdapter().getObject(PACKET_MANAGER_ACCOUNT, packetInfo.getId(),
@@ -163,18 +171,28 @@ public class PacketKeeper {
 
             Packet packet = new Packet();
 
-            // Get metadata
-            long s3MetaStart = System.currentTimeMillis();
-            Map<String, Object> metaInfo = getAdapter().getMetaData(PACKET_MANAGER_ACCOUNT, packetInfo.getId(),
-                    packetInfo.getSource(), packetInfo.getProcess(), packetName);
-            LOGGER.info(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID,
-                    packetName, "PERF S3 getMetaData took " + (System.currentTimeMillis() - s3MetaStart) + " ms");
-            if (metaInfo != null && !metaInfo.isEmpty()) {
-                packet.setPacketInfo(PacketManagerHelper.getPacketInfo(metaInfo));
-            } else {
+            // Check packetInfoCache first to skip the extra getMetaData() S3 call.
+            // PacketInfo is tiny (~200 bytes of strings) — safe to cache indefinitely per instance.
+            PacketInfo cachedMeta = packetInfoCache.get(metaCacheKey);
+            if (cachedMeta != null) {
                 LOGGER.info(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID,
-                        packetName, "metainfo not found for this packet");
-                packet.setPacketInfo(packetInfo);
+                        packetName, "PERF S3 getMetaData skipped - PacketInfo served from metadata cache");
+                packet.setPacketInfo(cachedMeta);
+            } else {
+                long s3MetaStart = System.currentTimeMillis();
+                Map<String, Object> metaInfo = getAdapter().getMetaData(PACKET_MANAGER_ACCOUNT, packetInfo.getId(),
+                        packetInfo.getSource(), packetInfo.getProcess(), packetName);
+                LOGGER.info(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID,
+                        packetName, "PERF S3 getMetaData took " + (System.currentTimeMillis() - s3MetaStart) + " ms");
+                if (metaInfo != null && !metaInfo.isEmpty()) {
+                    PacketInfo resolvedInfo = PacketManagerHelper.getPacketInfo(metaInfo);
+                    packetInfoCache.put(metaCacheKey, resolvedInfo);
+                    packet.setPacketInfo(resolvedInfo);
+                } else {
+                    LOGGER.info(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID,
+                            packetName, "metainfo not found for this packet");
+                    packet.setPacketInfo(packetInfo);
+                }
             }
             long decryptStart = System.currentTimeMillis();
             byte[] subPacket = getCryptoService().decrypt(helper.getRefId(

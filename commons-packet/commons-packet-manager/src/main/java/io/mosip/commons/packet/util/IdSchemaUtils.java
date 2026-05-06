@@ -15,6 +15,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.lang3.ArrayUtils;
@@ -42,9 +43,11 @@ import io.mosip.commons.packet.exception.ApiNotAccessibleException;
 @Component
 public class IdSchemaUtils {
 
-    private org.json.simple.JSONObject mappingJsonObject = null;
+    private volatile org.json.simple.JSONObject mappingJsonObject = null;
+    private final Object mappingJsonLock = new Object();
     private static Map<String, String> categorySubpacketMapping = new HashMap<>();
-    private Map<Double, String> idschema = null;
+    private final Map<Double, String> idschema = new ConcurrentHashMap<>();
+    private final Object idschemaLock = new Object();
     public static final String RESPONSE = "response";
     public static final String PROPERTIES = "properties";
     public static final String IDENTITY = "identity";
@@ -114,33 +117,36 @@ public class IdSchemaUtils {
      * @throws IOException
      */
     public String getIdSchema(Double version) throws ApiNotAccessibleException, IOException {
-        if (idschema != null && !idschema.isEmpty() && idschema.get(version) != null)
-            return idschema.get(version);
-        UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(idschemaUrl);
-        if (version != null)
-            builder.queryParam(PacketManagerConstants.SCHEMA_VERSION_QUERY_PARAM, version);
-        UriComponents uriComponents = builder.build(false).encode();
+        String cached = idschema.get(version);
+        if (cached != null)
+            return cached;
 
-        String response = restTemplate.getForObject(uriComponents.toUri(), String.class);
-        String responseString = null;
-        try {
-            JSONObject jsonObject = new JSONObject(response);
-            JSONObject respObj = (JSONObject) jsonObject.get(RESPONSE);
-            responseString = respObj != null ? (String) respObj.get(SCHEMA_JSON) : null;
-        } catch (JSONException e) {
-            throw new IOException(e);
+        synchronized (idschemaLock) {
+            cached = idschema.get(version);
+            if (cached != null)
+                return cached;
+
+            UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(idschemaUrl);
+            if (version != null)
+                builder.queryParam(PacketManagerConstants.SCHEMA_VERSION_QUERY_PARAM, version);
+            UriComponents uriComponents = builder.build(false).encode();
+
+            String response = restTemplate.getForObject(uriComponents.toUri(), String.class);
+            String responseString = null;
+            try {
+                JSONObject jsonObject = new JSONObject(response);
+                JSONObject respObj = (JSONObject) jsonObject.get(RESPONSE);
+                responseString = respObj != null ? (String) respObj.get(SCHEMA_JSON) : null;
+            } catch (JSONException e) {
+                throw new IOException(e);
+            }
+
+            if (responseString == null)
+                throw new ApiNotAccessibleException("Could not get id schema");
+
+            idschema.put(version, responseString);
+            return responseString;
         }
-
-        if (responseString != null) {
-            if (idschema == null) {
-                idschema = new HashMap<>();
-                idschema.put(version, responseString);
-            } else
-                idschema.put(version, responseString);
-        } else
-            throw new ApiNotAccessibleException("Could not get id schema");
-
-        return idschema.get(version);
     }
 
     /**
@@ -250,11 +256,13 @@ public class IdSchemaUtils {
     }
 
     public org.json.simple.JSONObject getMappingJson() throws IOException {
-
         if (mappingJsonObject == null) {
-            String mappingJsonString = restTemplate.getForObject(configServerUrl + "/" + mappingjsonFileName, String.class);
-            mappingJsonObject = objMapper.readValue(mappingJsonString, org.json.simple.JSONObject.class);
-
+            synchronized (mappingJsonLock) {
+                if (mappingJsonObject == null) {
+                    String mappingJsonString = restTemplate.getForObject(configServerUrl + "/" + mappingjsonFileName, String.class);
+                    mappingJsonObject = objMapper.readValue(mappingJsonString, org.json.simple.JSONObject.class);
+                }
+            }
         }
         return getJSONObject(mappingJsonObject, PacketManagerConstants.IDENTITY);
     }
