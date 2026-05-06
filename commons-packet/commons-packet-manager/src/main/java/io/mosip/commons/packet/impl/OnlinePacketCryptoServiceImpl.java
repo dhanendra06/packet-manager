@@ -97,8 +97,11 @@ public class OnlinePacketCryptoServiceImpl implements IPacketCryptoService {
                     .parse(DateUtils2.getUTCCurrentDateTimeString(DATETIME_PATTERN), format);
             request.setRequesttime(localdatetime);
             HttpEntity<RequestWrapper<TpmSignRequestDto>> httpEntity = new HttpEntity<>(request);
+            long signStart = System.currentTimeMillis();
             ResponseEntity<String> response = restTemplate.exchange(keymanagerCsSignUrl, HttpMethod.POST, httpEntity,
                     String.class);
+            LOGGER.info(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID, null,
+                    "PERF Keymanager csSign call took " + (System.currentTimeMillis() - signStart) + " ms");
             LinkedHashMap responseMap = (LinkedHashMap) mapper.readValue(response.getBody(), LinkedHashMap.class).get("response");
             if (responseMap != null && responseMap.size() > 0)
                 return CryptoUtil.decodeURLSafeBase64((String) responseMap.get("data"));
@@ -143,7 +146,10 @@ public class OnlinePacketCryptoServiceImpl implements IPacketCryptoService {
             request.setVersion(APPLICATION_VERSION);
             HttpEntity<RequestWrapper<CryptomanagerRequestDto>> httpEntity = new HttpEntity<>(request);
 
+            long encryptStart = System.currentTimeMillis();
             ResponseEntity<String> response = restTemplate.exchange(cryptomanagerEncryptUrl, HttpMethod.POST, httpEntity, String.class);
+            LOGGER.info(PacketManagerLogger.SESSIONID, PacketManagerLogger.REFERENCEID, refId,
+                    "PERF Keymanager encrypt call took " + (System.currentTimeMillis() - encryptStart) + " ms");
             CryptomanagerResponseDto responseObject = mapper.readValue(response.getBody(), CryptomanagerResponseDto.class);
             if (responseObject != null &&
                     responseObject.getErrors() != null && !responseObject.getErrors().isEmpty()) {
@@ -215,7 +221,10 @@ public class OnlinePacketCryptoServiceImpl implements IPacketCryptoService {
             request.setVersion(APPLICATION_VERSION);
             HttpEntity<RequestWrapper<CryptomanagerRequestDto>> httpEntity = new HttpEntity<>(request);
 
+            long decryptStart = System.currentTimeMillis();
             ResponseEntity<String> response = restTemplate.exchange(cryptomanagerDecryptUrl, HttpMethod.POST, httpEntity, String.class);
+            LOGGER.info(PacketManagerLogger.SESSIONID, PacketManagerLogger.REFERENCEID, refId,
+                    "PERF Keymanager decrypt call took " + (System.currentTimeMillis() - decryptStart) + " ms");
 
             CryptomanagerResponseDto responseObject = mapper.readValue(response.getBody(), CryptomanagerResponseDto.class);
 
@@ -275,8 +284,11 @@ public class OnlinePacketCryptoServiceImpl implements IPacketCryptoService {
                     .parse(DateUtils2.getUTCCurrentDateTimeString(DATETIME_PATTERN), format);
             request.setRequesttime(localdatetime);
             HttpEntity<RequestWrapper<TpmSignVerifyRequestDto>> httpEntity = new HttpEntity<>(request);
+            long verifyStart = System.currentTimeMillis();
             ResponseEntity<String> response = restTemplate.exchange(keymanagerCsverifysignUrl, HttpMethod.POST, httpEntity,
                     String.class);
+            LOGGER.info(PacketManagerLogger.SESSIONID, PacketManagerLogger.REFERENCEID, refId,
+                    "PERF Keymanager csVerifySign call took " + (System.currentTimeMillis() - verifyStart) + " ms");
             LinkedHashMap responseMap = (LinkedHashMap) mapper.readValue(response.getBody(), LinkedHashMap.class).get("response");//.get("signature");
             if (responseMap != null && responseMap.size() > 0) {
                 boolean result = responseMap.get("verified") != null && responseMap.get("verified").toString().equalsIgnoreCase("true");
@@ -302,8 +314,11 @@ public class OnlinePacketCryptoServiceImpl implements IPacketCryptoService {
 
 	private String getPublicKey(String refId) throws IOException {
         String machineId = refId.split("_")[1];
+        long tpmKeyStart = System.currentTimeMillis();
 		ResponseEntity<String> response = restTemplate.exchange(syncdataGetTpmKeyUrl+machineId, HttpMethod.GET, null,
                 String.class);
+        LOGGER.info(PacketManagerLogger.SESSIONID, PacketManagerLogger.REFERENCEID, refId,
+                "PERF Syncdata getTpmPublicKey call took " + (System.currentTimeMillis() - tpmKeyStart) + " ms");
 		 LinkedHashMap responseMap = (LinkedHashMap) mapper.readValue(response.getBody(), LinkedHashMap.class).get("response");//.get("signature");
 		 if (responseMap != null && responseMap.size() > 0)
              return (String) responseMap.get("signingPublicKey");

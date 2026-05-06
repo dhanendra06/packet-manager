@@ -141,10 +141,14 @@ public class PacketKeeper {
      */
     public Packet getPacket(PacketInfo packetInfo) throws PacketKeeperException {
         String packetName = getName(packetInfo.getId(), packetInfo.getPacketName());
-        try (InputStream is = getAdapter().getObject(PACKET_MANAGER_ACCOUNT, packetInfo.getId(),
-                packetInfo.getSource(), packetInfo.getProcess(), packetName)) {
+        try {
+            long s3GetStart = System.currentTimeMillis();
+            InputStream isRaw = getAdapter().getObject(PACKET_MANAGER_ACCOUNT, packetInfo.getId(),
+                    packetInfo.getSource(), packetInfo.getProcess(), packetName);
+            LOGGER.info(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID,
+                    packetName, "PERF S3 getObject took " + (System.currentTimeMillis() - s3GetStart) + " ms");
 
-            if (is == null) {
+            if (isRaw == null) {
                 LOGGER.error(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID,
                         packetName, packetInfo.getProcess() + " Packet is not present in packet store.");
                 throw new PacketKeeperException(ErrorCode.PACKET_NOT_FOUND.getErrorCode(),
@@ -152,13 +156,19 @@ public class PacketKeeper {
             }
 
             // Convert stream to byte array (necessary for encryption/decryption and signature verification)
-            byte[] encryptedSubPacket = IOUtils.toByteArray(is);
+            byte[] encryptedSubPacket;
+            try (InputStream is = isRaw) {
+                encryptedSubPacket = IOUtils.toByteArray(is);
+            }
 
             Packet packet = new Packet();
 
             // Get metadata
+            long s3MetaStart = System.currentTimeMillis();
             Map<String, Object> metaInfo = getAdapter().getMetaData(PACKET_MANAGER_ACCOUNT, packetInfo.getId(),
                     packetInfo.getSource(), packetInfo.getProcess(), packetName);
+            LOGGER.info(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID,
+                    packetName, "PERF S3 getMetaData took " + (System.currentTimeMillis() - s3MetaStart) + " ms");
             if (metaInfo != null && !metaInfo.isEmpty()) {
                 packet.setPacketInfo(PacketManagerHelper.getPacketInfo(metaInfo));
             } else {
@@ -166,8 +176,11 @@ public class PacketKeeper {
                         packetName, "metainfo not found for this packet");
                 packet.setPacketInfo(packetInfo);
             }
+            long decryptStart = System.currentTimeMillis();
             byte[] subPacket = getCryptoService().decrypt(helper.getRefId(
                     packet.getPacketInfo().getId(), packet.getPacketInfo().getRefId()), encryptedSubPacket);
+            LOGGER.info(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID,
+                    packetName, "PERF Keymanager decrypt took " + (System.currentTimeMillis() - decryptStart) + " ms");
             packet.setPacket(subPacket);
 
 
@@ -204,22 +217,34 @@ public class PacketKeeper {
     public PacketInfo putPacket(Packet packet) throws PacketKeeperException {
         try {
             // Encrypt packet
+            long encryptStart = System.currentTimeMillis();
             byte[] encryptedSubPacket = getCryptoService().encrypt(packet.getPacketInfo().getRefId(), packet.getPacket());
+            LOGGER.info(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID,
+                    packet.getPacketInfo().getId(), "PERF Keymanager encrypt took " + (System.currentTimeMillis() - encryptStart) + " ms");
 
             // Put packet in object store using try-with-resources
             try (ByteArrayInputStream encryptedStream = new ByteArrayInputStream(encryptedSubPacket)) {
+                long s3PutStart = System.currentTimeMillis();
                 boolean response = getAdapter().putObject(PACKET_MANAGER_ACCOUNT,
                         packet.getPacketInfo().getId(), packet.getPacketInfo().getSource(),
                         packet.getPacketInfo().getProcess(), packet.getPacketInfo().getPacketName(), encryptedStream);
+                LOGGER.info(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID,
+                        packet.getPacketInfo().getId(), "PERF S3 putObject took " + (System.currentTimeMillis() - s3PutStart) + " ms");
                 if (response) {
                     PacketInfo packetInfo = packet.getPacketInfo();
                     // sign encrypted packet
+                    long signStart = System.currentTimeMillis();
                     packetInfo.setSignature(CryptoUtil.encodeToURLSafeBase64(getCryptoService().sign(packet.getPacket())));
+                    LOGGER.info(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID,
+                            packet.getPacketInfo().getId(), "PERF Keymanager sign took " + (System.currentTimeMillis() - signStart) + " ms");
                     // generate encrypted packet hash
                     packetInfo.setEncryptedHash(CryptoUtil.encodeToURLSafeBase64(HMACUtils2.generateHash(encryptedSubPacket)));
                     Map<String, Object> metaMap = PacketManagerHelper.getMetaMap(packetInfo);
+                    long s3MetaPutStart = System.currentTimeMillis();
                     metaMap = getAdapter().addObjectMetaData(PACKET_MANAGER_ACCOUNT,
                             packet.getPacketInfo().getId(), packet.getPacketInfo().getSource(), packet.getPacketInfo().getProcess(), packet.getPacketInfo().getPacketName(), metaMap);
+                    LOGGER.info(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID,
+                            packet.getPacketInfo().getId(), "PERF S3 addObjectMetaData took " + (System.currentTimeMillis() - s3MetaPutStart) + " ms");
                     return PacketManagerHelper.getPacketInfo(metaMap);
                 } else {
                     throw new PacketKeeperException(PacketUtilityErrorCodes.PACKET_KEEPER_PUT_ERROR.getErrorCode(),
