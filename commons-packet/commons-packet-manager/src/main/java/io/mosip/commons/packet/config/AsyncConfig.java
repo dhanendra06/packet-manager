@@ -75,7 +75,7 @@ public class AsyncConfig {
      *   packetmanager.fetch.queue.capacity          (default 200)  — queue before burst threads spin up
      *   packetmanager.thread.keep.alive.seconds     (default  60)  — idle burst-thread TTL
      */
-    @Bean(name = "packetFetchExecutor")
+/*    @Bean(name = "packetFetchExecutor")
     public ExecutorService packetFetchExecutor() {
         fetchPool = new ThreadPoolExecutor(
                 fetchPoolSize,
@@ -85,8 +85,12 @@ public class AsyncConfig {
                 Thread.ofVirtual().name("pkt-fetch-", 0).factory(),
                 new ThreadPoolExecutor.CallerRunsPolicy());
         return fetchPool;
+    }*/
+    @Bean(name = "packetFetchExecutor")
+    public ExecutorService packetFetchExecutor() {
+        fetchPool = Executors.newVirtualThreadPerTaskExecutor();
+        return fetchPool;
     }
-
     /**
      * Virtual-thread pool for parallel sub-packet S3 fetches during validation.
      * Separate from packetFetchExecutor so validate concurrency can be tuned independently.
@@ -97,7 +101,7 @@ public class AsyncConfig {
      *   packetmanager.validate.queue.capacity        (default 150) — queue before burst threads spin up
      *   packetmanager.thread.keep.alive.seconds      (default  60) — idle burst-thread TTL
      */
-    @Bean(name = "packetValidateExecutor")
+/*    @Bean(name = "packetValidateExecutor")
     public ExecutorService packetValidateExecutor() {
         validatePool = new ThreadPoolExecutor(
                 validatePoolSize,
@@ -107,7 +111,7 @@ public class AsyncConfig {
                 Thread.ofVirtual().name("pkt-validate-", 0).factory(),
                 new ThreadPoolExecutor.CallerRunsPolicy());
         return validatePool;
-    }
+    }*/
 
     @PreDestroy
     public void shutdown() {
