@@ -441,10 +441,25 @@ public class PacketReaderService {
 
     public TagResponseDto getTags(TagRequestDto tagRequestDto) {
     	try {
+		    TagResponseDto tagResponseDto = new TagResponseDto();
+		    String type = tagRequestDto.getType() == null ? null : tagRequestDto.getType().trim();
+
+		    // type=anonymous: return ONLY the anonymous file from the object store as a
+		    // single-entry map under key "anonymous". Caller (e.g. workflow-manager) uses
+		    // this as the base anonymous payload then enriches it with stage data.
+		    if (type != null && "anonymous".equalsIgnoreCase(type)) {
+		        String profileJson = packetReader.getAnonymousProfile(tagRequestDto.getId());
+		        Map<String, String> result = new HashMap<>();
+		        if (profileJson != null) {
+		            result.put("anonymous", profileJson);
+		        }
+		        tagResponseDto.setTags(result);
+		        return tagResponseDto;
+		    }
+
 			Map<String, String> tags = new HashMap<String, String>();
 			Map<String, String> existingTags = packetReader.getTags(tagRequestDto.getId());
 			List<String> tagNames=tagRequestDto.getTagNames();
-		    TagResponseDto tagResponseDto = new TagResponseDto();
 			if (tagNames != null && !tagNames.isEmpty()) {
 				for (String tag : tagNames) {
 					if (existingTags.containsKey(tag)) {
@@ -455,8 +470,26 @@ public class PacketReaderService {
 					}
 				}
 				tagResponseDto.setTags(tags);
+			} else if (type != null && "all".equalsIgnoreCase(type)) {
+				// type=all: return packet tags + the anonymous file (no filtering).
+				Map<String, String> combined = new HashMap<>(existingTags);
+				String profileJson = packetReader.getAnonymousProfile(tagRequestDto.getId());
+				if (profileJson != null) {
+					combined.put("anonymous", profileJson);
+				}
+				tagResponseDto.setTags(combined);
 			} else {
-				tagResponseDto.setTags(existingTags);
+				// Default (no type): filter out any tag entry whose key contains "anonymous"
+				// so legacy callers never receive the anonymous payload. Preserves backward
+				// compatibility with the pre-anonymous-file world.
+				Map<String, String> filtered = new HashMap<>();
+				for (Map.Entry<String, String> e : existingTags.entrySet()) {
+					if (e.getKey() == null
+							|| !e.getKey().toLowerCase().contains("anonymous")) {
+						filtered.put(e.getKey(), e.getValue());
+					}
+				}
+				tagResponseDto.setTags(filtered);
 			}
            return tagResponseDto;
 		} catch (Exception e) {

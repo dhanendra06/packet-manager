@@ -232,4 +232,15 @@ public class PacketWriter {
 	public void deleteTags(TagRequestDto tagDto, String id) {
 		packetKeeper.deleteTags(tagDto);
 	}
+
+	/**
+	 * Persist the anonymous profile JSON for a registration ID to the configured object store.
+	 *
+	 * @param id          the registration ID
+	 * @param profileJson the anonymous profile as a JSON string
+	 * @return {@code true} if the write succeeded
+	 */
+	public boolean putAnonymousProfile(String id, String profileJson) {
+		return packetKeeper.putAnonymousProfile(id, profileJson);
+	}
 }

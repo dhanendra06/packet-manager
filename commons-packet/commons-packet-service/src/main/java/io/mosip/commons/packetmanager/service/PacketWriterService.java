@@ -66,8 +66,31 @@ public class PacketWriterService {
 			}
     }
     
+    /** Reserved tag key that, when supplied to addOrUpdate, is intercepted and
+     *  routed to the object store as the {@code anonymous.json} file.
+     *  Callers can include this key alongside regular tags; the anonymous value
+     *  is removed from the tag set before the rest is persisted as tags, so
+     *  pre-existing tag-only flows continue to work unchanged. */
+    private static final String ANONYMOUS_TAG_KEY = "anonymous";
+
     public TagResponseDto updateTags(TagDto tagDto) {
     	try {
+			// Intercept the "anonymous" entry (if present): write its value to the
+			// object store as a file and strip it from the tags map so it is NOT
+			// persisted in the tag table. Existing callers that don't use this key
+			// see no behaviour change.
+			Map<String, String> incomingTags = tagDto.getTags();
+			if (incomingTags != null && incomingTags.containsKey(ANONYMOUS_TAG_KEY)) {
+				String anonymousJson = incomingTags.get(ANONYMOUS_TAG_KEY);
+				if (anonymousJson != null) {
+					packetWriter.putAnonymousProfile(tagDto.getId(), anonymousJson);
+				}
+				// Work on a copy so we don't mutate the caller's map
+				Map<String, String> sanitized = new HashMap<>(incomingTags);
+				sanitized.remove(ANONYMOUS_TAG_KEY);
+				tagDto.setTags(sanitized);
+			}
+
 			Map<String, String> newTags = new HashMap<String, String>();
 			Map<String, String> existingTags = packetReader.getTags(tagDto.getId());
 			if (existingTags.isEmpty()) {
