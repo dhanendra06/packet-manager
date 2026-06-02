@@ -306,11 +306,20 @@ public class PacketKeeper {
 
 	/**
 	 * Object-store key under which the anonymous profile JSON is persisted.
-	 * Stored as a top-level object (no source/process container) so it can be
-	 * fetched independently of any packet container layout. The getTags API
-	 * surfaces this file as a tag entry under key {@code "anonymous"}.
+	 * Stored in a dedicated {@code META/META} pseudo-container so the entry is
+	 * (a) unambiguously distinguishable from real packet containers and
+	 * (b) never returned as a null-source/null-process ObjectDto when callers
+	 *     enumerate containers via {@code PacketReader.info(rid)}.
+	 *
+	 * The getTags API surfaces the file under tag key {@code "anonymous"}.
 	 */
 	private static final String ANONYMOUS_PROFILE_OBJECT_NAME = "anonymous.json";
+
+	/** Pseudo-source for the anonymous profile container. */
+	private static final String ANONYMOUS_PROFILE_SOURCE = "META";
+
+	/** Pseudo-process for the anonymous profile container. */
+	private static final String ANONYMOUS_PROFILE_PROCESS = "META";
 
 	/** Tag key used to surface the anonymous file in getTags API responses. */
 	public static final String ANONYMOUS_TAG_KEY = "anonymous";
@@ -324,7 +333,8 @@ public class PacketKeeper {
 	 */
 	public boolean putAnonymousProfile(String id, String profileJson) {
 		try (ByteArrayInputStream stream = new ByteArrayInputStream(profileJson.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
-			return getAdapter().putObject(PACKET_MANAGER_ACCOUNT, id, null, null,
+			return getAdapter().putObject(PACKET_MANAGER_ACCOUNT, id,
+					ANONYMOUS_PROFILE_SOURCE, ANONYMOUS_PROFILE_PROCESS,
 					ANONYMOUS_PROFILE_OBJECT_NAME, stream);
 		} catch (Exception e) {
 			LOGGER.error(PacketManagerLogger.SESSIONID, PacketManagerLogger.REGISTRATIONID, id,
@@ -341,7 +351,8 @@ public class PacketKeeper {
 	 * @return the JSON string, or {@code null} if no profile exists for this ID
 	 */
 	public String getAnonymousProfile(String id) {
-		try (InputStream is = getAdapter().getObject(PACKET_MANAGER_ACCOUNT, id, null, null,
+		try (InputStream is = getAdapter().getObject(PACKET_MANAGER_ACCOUNT, id,
+				ANONYMOUS_PROFILE_SOURCE, ANONYMOUS_PROFILE_PROCESS,
 				ANONYMOUS_PROFILE_OBJECT_NAME)) {
 			if (is == null) {
 				return null;
