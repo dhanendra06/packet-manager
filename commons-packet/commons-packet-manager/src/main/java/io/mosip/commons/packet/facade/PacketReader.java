@@ -228,14 +228,6 @@ public class PacketReader {
         return tags;
     }
 
-    /**
-     * Fetch the anonymous profile JSON for a registration ID from the object store.
-     * Returns {@code null} if no profile has been stored.
-     */
-    public String getAnonymousProfile(String id) {
-        return packetKeeper.getAnonymousProfile(id);
-    }
-
     public boolean validatePacket(String id, String source, String process) {
         return getProvider(source, process).validatePacket(id, source, process);
     }

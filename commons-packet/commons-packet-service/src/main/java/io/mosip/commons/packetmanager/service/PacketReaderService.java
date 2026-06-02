@@ -444,23 +444,24 @@ public class PacketReaderService {
 		    TagResponseDto tagResponseDto = new TagResponseDto();
 		    String type = tagRequestDto.getType() == null ? null : tagRequestDto.getType().trim();
 
-		    // type=anonymous: return ONLY the anonymous file from the object store as a
-		    // single-entry map under key "anonymous". Caller (e.g. workflow-manager) uses
-		    // this as the base anonymous payload then enriches it with stage data.
+			Map<String, String> existingTags = packetReader.getTags(tagRequestDto.getId());
+			List<String> tagNames=tagRequestDto.getTagNames();
+
+		    // type=anonymous: return ONLY tag entries whose key contains "anonymous"
+		    // (typically a single entry under key "anonymous" written by the classifier).
 		    if (type != null && "anonymous".equalsIgnoreCase(type)) {
-		        String profileJson = packetReader.getAnonymousProfile(tagRequestDto.getId());
 		        Map<String, String> result = new HashMap<>();
-		        if (profileJson != null) {
-		            result.put("anonymous", profileJson);
+		        for (Map.Entry<String, String> e : existingTags.entrySet()) {
+		            if (e.getKey() != null && e.getKey().toLowerCase().contains("anonymous")) {
+		                result.put(e.getKey(), e.getValue());
+		            }
 		        }
 		        tagResponseDto.setTags(result);
 		        return tagResponseDto;
 		    }
 
-			Map<String, String> tags = new HashMap<String, String>();
-			Map<String, String> existingTags = packetReader.getTags(tagRequestDto.getId());
-			List<String> tagNames=tagRequestDto.getTagNames();
 			if (tagNames != null && !tagNames.isEmpty()) {
+				Map<String, String> tags = new HashMap<String, String>();
 				for (String tag : tagNames) {
 					if (existingTags.containsKey(tag)) {
 						tags.put(tag, existingTags.get(tag));
@@ -471,17 +472,12 @@ public class PacketReaderService {
 				}
 				tagResponseDto.setTags(tags);
 			} else if (type != null && "all".equalsIgnoreCase(type)) {
-				// type=all: return packet tags + the anonymous file (no filtering).
-				Map<String, String> combined = new HashMap<>(existingTags);
-				String profileJson = packetReader.getAnonymousProfile(tagRequestDto.getId());
-				if (profileJson != null) {
-					combined.put("anonymous", profileJson);
-				}
-				tagResponseDto.setTags(combined);
+				// type=all: return all packet tags including any "anonymous" entries.
+				tagResponseDto.setTags(existingTags);
 			} else {
 				// Default (no type): filter out any tag entry whose key contains "anonymous"
 				// so legacy callers never receive the anonymous payload. Preserves backward
-				// compatibility with the pre-anonymous-file world.
+				// compatibility with the pre-anonymous-tag world.
 				Map<String, String> filtered = new HashMap<>();
 				for (Map.Entry<String, String> e : existingTags.entrySet()) {
 					if (e.getKey() == null
